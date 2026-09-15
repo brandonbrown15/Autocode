@@ -71,7 +71,7 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 python3 orchestrator/run_night.py --mock
 ```
 
-Local Hermes handles Local-safe work (with retries). Harder work is scored and sent up a **cost ladder** — Grok (cheap) → Claude (mid-range) → Cursor Cloud (premium) — so mid tasks don’t burn premium models. See [docs/routing.md](docs/routing.md).
+Local Hermes handles Local-safe work (with retries). Harder work is scored and sent up a **cost ladder** — prefer **Cursor Ultra** (included Grok) over metered xAI Grok API, with optional Claude mid. Direct Grok keys are demoted after cost research. See [docs/routing.md](docs/routing.md).
 
 ## Guardrails
 

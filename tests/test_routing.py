@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from orchestrator.policy import (  # noqa: E402
+    COST_PROFILES,
     decide_route,
     score_task,
     target_for_tier,
@@ -48,7 +49,6 @@ class ScoreAndTierTests(unittest.TestCase):
         self.assertEqual(tier_for_score(s), "local")
 
     def test_cloud_only_is_mid_not_premium_by_default(self) -> None:
-        # Cloud-only + P2 ≈ 60 → standard (Claude), not Cursor
         t = make_task(
             complexity="Cloud-only",
             priority="P2",
@@ -74,14 +74,15 @@ class ScoreAndTierTests(unittest.TestCase):
     def test_mid_tier_target_is_claude(self) -> None:
         self.assertEqual(target_for_tier("standard", assume_keys=True), "Claude")
 
-    def test_cheap_tier_target_is_grok(self) -> None:
-        self.assertEqual(target_for_tier("cheap", assume_keys=True), "Grok Bot")
+    def test_cheap_tier_target_is_cursor_not_grok(self) -> None:
+        # After cost research: Cursor Ultra pool beats metered Grok API
+        self.assertEqual(target_for_tier("cheap", assume_keys=True), "Cursor Cloud")
 
-    def test_premium_tier_target_is_cursor(self) -> None:
+    def test_premium_tier_prefers_cursor(self) -> None:
         self.assertEqual(target_for_tier("premium", assume_keys=True), "Cursor Cloud")
 
-    def test_mid_falls_back_to_cheap_before_premium(self) -> None:
-        # No ANTHROPIC → prefer Grok over Cursor when mid unavailable
+    def test_mid_falls_back_to_cursor_before_grok(self) -> None:
+        # No Anthropic → fall back to Cursor (cheap slot), not metered Grok
         with mock.patch.dict(os.environ, {}, clear=False):
             for k in (
                 "ANTHROPIC_API_KEY",
@@ -90,11 +91,29 @@ class ScoreAndTierTests(unittest.TestCase):
                 "AUTOCODE_GROK_DELEGATE_CMD",
                 "CURSOR_API_KEY",
                 "AUTOCODE_CURSOR_DELEGATE_CMD",
+                "AUTOCODE_COST_LADDER",
+                "AUTOCODE_COST_PROFILE",
             ):
                 os.environ.pop(k, None)
-            os.environ["XAI_API_KEY"] = "xai-test"
             os.environ["CURSOR_API_KEY"] = "cursor-test"
-            self.assertEqual(target_for_tier("standard", assume_keys=False), "Grok Bot")
+            os.environ["XAI_API_KEY"] = "xai-test"
+            self.assertEqual(target_for_tier("standard", assume_keys=False), "Cursor Cloud")
+
+    def test_cursor_ultra_profile_routes_all_cloud_to_cursor(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOCODE_COST_PROFILE": "cursor-ultra"}, clear=False):
+            os.environ.pop("AUTOCODE_COST_LADDER", None)
+            self.assertEqual(COST_PROFILES["cursor-ultra"][0], "Cursor Cloud")
+            self.assertEqual(target_for_tier("cheap", assume_keys=True), "Cursor Cloud")
+            self.assertEqual(target_for_tier("standard", assume_keys=True), "Cursor Cloud")
+            self.assertEqual(target_for_tier("premium", assume_keys=True), "Cursor Cloud")
+
+    def test_metered_profile_puts_grok_last(self) -> None:
+        with mock.patch.dict(os.environ, {"AUTOCODE_COST_PROFILE": "metered"}, clear=False):
+            os.environ.pop("AUTOCODE_COST_LADDER", None)
+            self.assertEqual(target_for_tier("cheap", assume_keys=True), "Claude")
+            self.assertEqual(target_for_tier("standard", assume_keys=True), "Cursor Cloud")
+            # Premium prefers Cursor capability even when Grok is on the ladder
+            self.assertEqual(target_for_tier("premium", assume_keys=True), "Cursor Cloud")
 
 
 class DecideRouteTests(unittest.TestCase):
@@ -127,16 +146,28 @@ class DecideRouteTests(unittest.TestCase):
         self.assertEqual(d.target, "Cursor Cloud")
         self.assertEqual(d.tier, "premium")
 
-    def test_light_local_fail_escalates_cheap(self) -> None:
+    def test_light_local_fail_escalates_to_cursor_pool(self) -> None:
         t = make_task(complexity="Local-safe", priority="P3")
         d = decide_route(t, local_failures=2, max_local_attempts=2, assume_keys=True)
-        self.assertEqual(d.target, "Grok Bot")
+        self.assertEqual(d.target, "Cursor Cloud")
         self.assertEqual(d.tier, "cheap")
 
     def test_explicit_model_route_wins(self) -> None:
         t = make_task(complexity="Local-safe", model_route="Claude")
         d = decide_route(t, assume_keys=True)
         self.assertEqual(d.target, "Claude")
+
+    def test_ultra_profile_skips_claude(self) -> None:
+        t = make_task(
+            complexity="Cloud-only",
+            priority="P2",
+            name="Mid feature",
+            acceptance="Ordinary change",
+        )
+        with mock.patch.dict(os.environ, {"AUTOCODE_COST_PROFILE": "cursor-ultra"}, clear=False):
+            os.environ.pop("AUTOCODE_COST_LADDER", None)
+            d = decide_route(t, assume_keys=True)
+            self.assertEqual(d.target, "Cursor Cloud")
 
 
 class RoutingIntegrationTests(unittest.TestCase):
@@ -167,7 +198,7 @@ class RoutingIntegrationTests(unittest.TestCase):
         self.assertEqual(preferred_cloud_target(t), "Claude")
 
     def test_cursor_key_does_not_steal_mid_tasks(self) -> None:
-        """Having CURSOR_API_KEY must not send every escalate to Cursor."""
+        """Having CURSOR_API_KEY must not send every escalate to Cursor when Claude fits."""
         hw = HardwareSnapshot(8000, 16000, 40.0, 0.5, True)
         t = make_task(
             complexity="Cloud-only",

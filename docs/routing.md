@@ -1,6 +1,6 @@
 # How Autocode decides local vs cloud
 
-Autocode runs **independently overnight** and picks the **cheapest model that can handle the task**.
+Autocode runs **independently overnight** and picks the **cheapest effective path** for each task.
 
 ```text
 Ready task
@@ -8,84 +8,91 @@ Ready task
    ├─ score task (Complexity + Priority + keywords + Model route)
    │
    ├─ score < 30  → local Hermes (Jetson / Ollama)
-   ├─ score 30–49 → cheap cloud   (Grok Bot)
-   ├─ score 50–69 → mid-range     (Claude)     ← too hard for local, not worth Cursor
-   ├─ score 70+   → premium       (Cursor Cloud)
+   ├─ score 30–49 → light cloud   (ladder slot 0)
+   ├─ score 50–69 → mid cloud     (ladder slot 1)
+   ├─ score 70+   → heavy cloud   (prefer Cursor capability)
    │
-   ├─ hardware / Hermes / Ollama unhealthy → same tier, never jump straight to premium
+   ├─ hardware / Hermes / Ollama unhealthy → same tier
    └─ Notion Model route set explicitly → that target wins
 ```
 
-## Why mid-range exists
+## Cost research ranking (2026)
 
-A lot of overnight work is **past local Ollama** (multi-file refactors, tricky APIs) but **does not need Cursor Cloud**. Those land on **Claude** (ladder slot 1) so you save premium spend for architecture, auth, infra, and P0 fires.
+Sticker $/MTok is misleading for overnight **agent loops** (big prompts + many tool turns). Effective spend rank:
 
-| Tier | Default target | Typical tasks |
-|------|----------------|---------------|
-| local | Local Hermes | typos, docs, small Local-safe edits |
-| cheap | Grok Bot | light cloud work / local failed once |
-| **standard (mid)** | **Claude** | Maybe-local / Cloud-only without heavy signals |
-| premium | Cursor Cloud | P0 + heavy keywords, big architecture, explicit route |
-| human | Human | no cloud keys configured |
+| Rank (cheapest →) | Path | Why |
+|-------------------|------|-----|
+| 1 | **Local Hermes** | Free compute on Jetson |
+| 2 | **Cursor Ultra** (~$200/mo) | Flat pool; **Grok 4.5/4.6 included** in Cursor Models + ~$400 Other Models |
+| 3 | **Claude Max / Claude Code** ($100–200/mo) | Flat subscription; optional if you already pay Ultra |
+| 4 | **Claude API** (Sonnet ~$2/$10 per MTok) | Metered; OK for occasional mid jobs |
+| 5 | **Direct xAI Grok API** ($2/$6, doubles past ~200k context) | **Often the worst** for agents — uncapped; $80/day is easy |
 
-Override the ladder (cheap → mid → premium → human):
+**Recommendation if you buy Cursor Ultra:** drop Claude Code *and* leave `XAI_API_KEY` empty overnight. Use Grok **through Cursor**, not the raw xAI meter.
 
 ```bash
-# .env (local only)
-AUTOCODE_COST_LADDER=Grok Bot,Claude,Cursor Cloud,Human
+# .env (local only) — your Ultra consolidation setup
+AUTOCODE_COST_PROFILE=cursor-ultra
+AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'
+# Leave empty on purpose:
+# XAI_API_KEY=
+# ANTHROPIC_API_KEY=
+AUTOCODE_DISABLE_METERED_GROK=1
 ```
+
+### Profiles
+
+| Profile | Ladder | Use when |
+|---------|--------|----------|
+| `cursor-ultra` | Cursor Cloud → Human | Paying Ultra; leave Claude Code |
+| `claude-max` | Claude → Cursor → Human | Keeping Claude Max as mid |
+| `metered` | Claude → Cursor → Grok Bot → Human | Pure API keys (Grok last) |
+| `default` | Cursor → Claude → Human | Mixed; **no** metered Grok by default |
+
+Override either way:
+
+```bash
+AUTOCODE_COST_PROFILE=cursor-ultra
+# or fully custom:
+AUTOCODE_COST_LADDER=Cursor Cloud,Human
+```
+
+## Why mid-range still exists
+
+With the default profile, mid tasks go to **Claude** (if configured) so light Cursor pool usage isn’t burned on ordinary Cloud-only work. On `cursor-ultra`, mid and heavy both use **Cursor Cloud** (your included Grok / Composer pool).
+
+| Tier | Default (`default`) | `cursor-ultra` |
+|------|---------------------|----------------|
+| local | Local Hermes | Local Hermes |
+| cheap | Cursor Cloud | Cursor Cloud |
+| standard (mid) | Claude | Cursor Cloud |
+| premium | Cursor Cloud | Cursor Cloud |
+| human | Human | Human |
 
 ## Local path
 
 1. Claim task (`Status = Running`)
 2. Health-check Hermes + Ollama (else escalate to scored tier)
 3. Create branch `hermes/<task-id>-slug`
-4. Run Hermes against local Ollama `coder-64k` (up to `AUTOCODE_MAX_LOCAL_ATTEMPTS`)
-5. Run detected repo checks (`pytest` / `npm test` / …)
+4. Run Hermes against local Ollama (up to `AUTOCODE_MAX_LOCAL_ATTEMPTS`)
+5. Run detected repo checks
 6. Open PR with `gh` when possible
 7. Mark **Needs review** + log **Agent Runs**
 
 ## Escalation / delegation
 
-Writes **Escalation Log** and a JSON payload under `state/delegates/` for a cloud agent.
-If the target is **Human**, the Build Queue item is marked **Blocked**.
+Writes **Escalation Log** + JSON under `state/delegates/`.
 
-| Target | Trigger / config |
-|--------|------------------|
-| Grok Bot | score cheap, or Model route = Grok; keys: `AUTOCODE_GROK_DELEGATE_CMD` → `XAI_API_KEY` → `OPENROUTER_API_KEY` |
-| Claude | score mid-range, or Model route = Claude; `ANTHROPIC_API_KEY` |
-| Cursor Cloud | score premium, or Model route = Cursor Cloud; `AUTOCODE_CURSOR_DELEGATE_CMD` / `CURSOR_API_KEY` |
-| Human | no cloud keys — digest asks you to pick it up |
+| Target | Config |
+|--------|--------|
+| Cursor Cloud | `AUTOCODE_CURSOR_DELEGATE_CMD` / `CURSOR_API_KEY` — preferred cloud path on Ultra |
+| Claude | `ANTHROPIC_API_KEY` — mid on `default` / `claude-max` |
+| Grok Bot | **Avoid metered** — only if on ladder/`metered` profile; `AUTOCODE_GROK_DELEGATE_CMD` → `XAI_API_KEY` → `OPENROUTER_API_KEY` |
+| Human | no cloud keys |
 
-If the preferred mid-range target isn’t configured, Autocode **falls back to cheaper** before spending on premium.
+### Grok Bot (metered — use sparingly)
 
-Set a Cursor handoff command, for example:
-
-```bash
-# .env (local only)
-AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'
-```
-
-### Grok Bot
-
-Tried in order when a task escalates to **Grok Bot**:
-
-1. `AUTOCODE_GROK_DELEGATE_CMD` — your webhook / Telegram / custom bot
-2. `XAI_API_KEY` — direct [xAI API](https://api.x.ai/v1)
-3. `OPENROUTER_API_KEY` — OpenRouter model `x-ai/grok-2` (override with `AUTOCODE_OPENROUTER_MODEL`)
-
-```bash
-# Direct xAI
-XAI_API_KEY=xai-...
-AUTOCODE_GROK_MODEL=grok-2-latest
-
-# Or your own Grok Bot webhook
-AUTOCODE_GROK_DELEGATE_CMD='./scripts/delegate_grok_stub.sh'
-```
-
-In Notion, set **Model route = Grok** (or Claude / Cursor Cloud) on a Build Queue row to force that target.
-
-The stub reads `$AUTOCODE_DELEGATE_PAYLOAD` (JSON with acceptance criteria + context).
+Direct xAI/OpenRouter Grok is tried only when the ladder includes **Grok Bot** and `AUTOCODE_DISABLE_METERED_GROK` is unset. Prefer Cursor Ultra’s included Grok instead.
 
 ## Scoring cheat sheet
 
@@ -100,10 +107,4 @@ The stub reads `$AUTOCODE_DELEGATE_PAYLOAD` (JSON with acceptance criteria + con
 
 ## Hardware thresholds (defaults)
 
-Escalate instead of thrashing locally when:
-
-- MemAvailable &lt; ~2.5 GiB
-- Free disk &lt; ~5 GiB
-- Load average very high vs CPU count
-
-Escalation still respects the score ladder (a light task under low RAM goes to **Grok**, not Cursor).
+Escalate instead of thrashing locally when MemAvailable / disk / load cross limits. Escalation still respects the cost profile (light tasks do not jump to metered Grok).
