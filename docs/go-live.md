@@ -59,7 +59,14 @@ Stubs succeed without doing work. Replace them:
 
 Keep `AUTOCODE_DISABLE_METERED_GROK=1` so overnight never hits uncapped `XAI_API_KEY`.
 
-### F. Dry runs → supervised night → timer
+### F. Remote monitor / intervene (so you’re not glued to the Jetson)
+
+- [ ] Install **Tailscale** (or similar) on the Jetson for SSH from your phone/laptop — see [remote-ops.md](remote-ops.md)
+- [ ] Set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` for progress pings + digest
+- [ ] Smoke: `./scripts/control.sh ping` and `./scripts/status.sh`
+- [ ] Know the intervene cmds: `pause` / `resume` / `skip BLD-…` / `abort`
+
+### G. Dry runs → supervised night → timer
 
 1. `./scripts/setup.sh --check` (or `./scripts/demo_night.sh`) — mock night OK  
 2. `./cron/overnight_run.sh --dry-run` against live Notion (route only)  
@@ -76,7 +83,8 @@ Keep `AUTOCODE_DISABLE_METERED_GROK=1` so overnight never hits uncapped `XAI_API
 - Notion claim / escalate / agent-run helpers  
 - Mock demo + unit tests  
 - systemd timer unit files  
-- Stub delegate scripts (shape of the handoff)
+- Stub delegate scripts (shape of the handoff)  
+- Remote status heartbeat + pause/abort/skip + Telegram progress hooks  
 
 ## Still on you (operator)
 
@@ -84,6 +92,9 @@ Keep `AUTOCODE_DISABLE_METERED_GROK=1` so overnight never hits uncapped `XAI_API
 2. Real Notion DBs + token  
 3. Real Cursor launcher (not stub)  
 4. Real Grok Bot webhook (not stub)  
-5. First supervised night, then enable the timer  
+5. Tailscale (or SSH tunnel) + Telegram for remote watch  
+6. First supervised night, then enable the timer  
+
+**Not plug-and-play:** cloning the repo onto the Jetson alone will **not** start useful overnight coding until A–E above are done. Mock mode (`./scripts/demo_night.sh`) works immediately to prove the loop.
 
 Until E is real, cloud escalations only write payloads under `state/delegates/` and log to Notion — they won’t finish coding in Cursor/Grok unattended.

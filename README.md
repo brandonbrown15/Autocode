@@ -35,7 +35,9 @@ cd Autocode
 ./cron/install_autopilot_timers.sh
 ```
 
-First overnight run: stay nearby — [docs/supervised-first-run.md](docs/supervised-first-run.md).
+First overnight run: stay nearby — [docs/supervised-first-run.md](docs/supervised-first-run.md).  
+Remote watch / intervene (Tailscale + Telegram + Notion): [docs/remote-ops.md](docs/remote-ops.md).  
+Full checklist: [docs/go-live.md](docs/go-live.md) — **not plug-and-play until Hermes/Notion/delegates are wired.**
 
 ## What you configure (local only)
 

@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 from notion import client as notion  # noqa: E402
 from orchestrator.checks import run_repo_checks  # noqa: E402
 from orchestrator.health import check_local_stack  # noqa: E402
+from orchestrator import ops  # noqa: E402
 from orchestrator.policy import decide_route, target_for_tier  # noqa: E402
 
 
@@ -724,6 +725,13 @@ def process_task(
             f"({decision.reason}; complexity={task.complexity}, "
             f"model_route={task.model_route}, prior_failures={prior_failures}, hw={asdict(hw)})"
         )
+        ops.write_status(
+            phase="escalating",
+            task_id=task.task_id,
+            task_name=task.name,
+            route=route,
+            detail=why,
+        )
         result = invoke_cloud_delegate(task, route, why, context, mock=mock)
         sink.escalate(task.name, why, result.summary, send_to=result.escalated_to or route)
         sink.log_run(task.name, result.outcome, result.summary, result.model_used, result.pr_url)
@@ -780,6 +788,14 @@ def process_task(
     failures = prior_failures
     last: RunResult | None = None
     while failures < max_attempts:
+        ops.write_status(
+            phase="running_local",
+            task_id=task.task_id,
+            task_name=task.name,
+            route="local",
+            detail=f"local attempt {failures + 1}/{max_attempts}",
+        )
+        ops.heartbeat(detail=f"local attempt {failures + 1}/{max_attempts}")
         last = run_local_hermes(task, repo_dir, branch, wall, mock=mock)
         if last.outcome in ("Success", "Partial"):
             clear_attempts(task.task_id)
@@ -889,6 +905,11 @@ def main() -> None:
     digest_path = ROOT / "state" / f"digest-{stamp}.txt"
     digest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    night_id = stamp
+    ops.set_control(clear=True)
+    ops.write_status(phase="starting", night_id=night_id, detail="night starting", clear_task=True)
+    ops.telegram_notify(f"Autocode night {night_id} starting (mock={args.mock})")
+
     if args.mock:
         os.environ.setdefault("AUTOCODE_CURSOR_DELEGATE_CMD", str(ROOT / "scripts" / "delegate_cursor_stub.sh"))
         sink: NotionSink = MockNotionSink(ROOT / "state" / "mock_notion.jsonl")
@@ -904,11 +925,25 @@ def main() -> None:
     if not tasks:
         print("No Ready tasks.")
         digest_path.write_text("No Ready tasks.\n")
+        ops.write_status(phase="done", detail="no ready tasks", clear_task=True)
+        ops.telegram_notify(f"Autocode night {night_id}: no Ready tasks")
         send_digest(digest_path)
         return
 
     digest: list[str] = [f"Autocode digest {datetime.now(timezone.utc).isoformat()}"]
     for task in tasks[:max_tasks]:
+        flags = ops.wait_if_paused()
+        if flags.abort:
+            digest.append(f"ABORTED before {task.task_id}")
+            ops.write_status(phase="aborted", detail=f"abort before {task.task_id}")
+            ops.telegram_notify(f"Autocode ABORTED before {task.task_id}")
+            break
+        if ops.should_skip(task.task_id):
+            ops.clear_skip(task.task_id)
+            digest.append(f"SKIPPED {task.task_id}: {task.name}")
+            ops.telegram_notify(f"Autocode SKIPPED {task.task_id}")
+            continue
+
         prior = 0 if args.mock else load_attempts(task.task_id)
         decision = decide_route(
             task,
@@ -918,6 +953,14 @@ def main() -> None:
             max_local_attempts=env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2),
         )
         route = decision.target
+        ops.write_status(
+            phase="routing",
+            task_id=task.task_id,
+            task_name=task.name,
+            route=route,
+            detail=decision.reason,
+            night_id=night_id,
+        )
         print(
             f"Task {task.task_id} {task.name!r} → route={route} "
             f"[score={decision.score} tier={decision.tier}] "
@@ -929,11 +972,18 @@ def main() -> None:
                 f"[score={decision.score}/{decision.tier}]"
             )
             continue
+        ops.telegram_notify(
+            f"Autocode {task.task_id} → {route} [{decision.tier}] {task.name}"
+        )
         process_task(task, hw, digest, sink, mock=args.mock)
 
+    final = ops.load_control()
+    phase = "aborted" if final.abort else "done"
+    ops.write_status(phase=phase, detail="night finished", clear_task=True)
     digest_path.write_text("\n".join(digest) + "\n")
     print(f"Digest: {digest_path}")
     print("\n".join(digest))
+    ops.telegram_notify(f"Autocode night {night_id} {phase}\n" + "\n".join(digest[-8:]))
     send_digest(digest_path)
 
 
