@@ -23,7 +23,7 @@
       />
       <div class="brand-copy">
         <p class="product">Autocode</p>
-        <p class="tagline">Overnight coding on your machine — watch it, pause it, keep it honest.</p>
+        <p class="tagline">Always-on coding on your machine — watch it, pause it, keep it honest.</p>
       </div>
     </div>
     <div class="live-chip" id="liveChip" data-phase="idle">
@@ -42,10 +42,11 @@
         <div><dt>Heartbeat</dt><dd id="hbVal">—</dd></div>
         <div><dt>Stuck?</dt><dd id="stuckVal">—</dd></div>
       </dl>
-      <div class="actions" role="group" aria-label="Night controls">
+      <div class="actions" role="group" aria-label="Work controls">
         <button type="button" class="btn primary" data-action="pause">Pause</button>
         <button type="button" class="btn" data-action="resume">Resume</button>
-        <button type="button" class="btn danger" data-action="abort">Abort night</button>
+        <button type="button" class="btn danger" data-action="abort">Abort</button>
+        <button type="button" class="btn ghost" id="workBtn">Run work cycle</button>
         <button type="button" class="btn ghost" id="demoBtn">Run mock night</button>
       </div>
       <form class="skip-row" id="skipForm">

@@ -49,5 +49,13 @@ if [[ " ${PASS_ARGS[*]} " != *" --mock "* && -z "${NOTION_TOKEN:-}" ]]; then
   exit 1
 fi
 
+# Share a lock with the continuous worker so cycles never overlap.
+LOCK="$STATE_DIR/run.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  echo "Another Autocode run holds $LOCK — overnight skipped this tick."
+  exit 0
+fi
+
 python3 "$ROOT/orchestrator/run_night.py" "${PASS_ARGS[@]}"
 echo "Done. Log: $LOG"

@@ -87,11 +87,18 @@ check_layout() {
     scripts/delegate_grok.sh
     docs/how-ai-talks.md
     docs/ui.md
+    docs/continuous.md
+    docs/remote-ops.md
     ui/server.py
     ui/static/index.html
     ui/static/app.css
     ui/static/app.js
     scripts/ui.sh
+    cron/worker_run.sh
+    cron/autocode-worker.timer
+    cron/autocode-worker.service
+    cron/autocode-ui.service
+    cron/install_autopilot_timers.sh
   )
   local missing=0
   for f in "${required[@]}"; do

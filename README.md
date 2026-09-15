@@ -1,8 +1,8 @@
 # Autocode
 
-Overnight coding autopilot for a Jetson (or any Linux + GPU box).
+Always-on coding autopilot for a Jetson (or any Linux + GPU box).
 
-It reads tasks from **your** Notion list, codes with a **local** AI, opens GitHub PRs, and can text you in the morning.
+It reads tasks from **your** Notion list, codes with a **local** AI all day (and overnight), opens GitHub PRs, and can text you when it needs help.
 
 ## Setup (this easy)
 
@@ -19,7 +19,8 @@ Full kid-simple checklist: **[START_HERE.md](START_HERE.md)**
 ## After it is running
 
 ```bash
-./scripts/ui.sh              # open http://127.0.0.1:8787/ dashboard
+./scripts/ui.sh              # dashboard http://127.0.0.1:8787/
+./scripts/ui.sh --remote     # phone/laptop via Tailscale
 ./scripts/status.sh          # what is it doing?
 ./scripts/control.sh pause   # stop for a bit
 ./scripts/doctor.sh          # is anything broken?
@@ -27,7 +28,7 @@ Full kid-simple checklist: **[START_HERE.md](START_HERE.md)**
 
 Add work in Notion → **Build Queue** → Status = **Ready**.
 
-Dashboard docs: **[docs/ui.md](docs/ui.md)**
+Always-on coding: **[docs/continuous.md](docs/continuous.md)** · Dashboard: **[docs/ui.md](docs/ui.md)** · Remote: **[docs/remote-ops.md](docs/remote-ops.md)**
 
 ## How the AIs talk
 

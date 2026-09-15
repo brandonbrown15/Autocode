@@ -10,7 +10,7 @@
 | **Telegram** | Night start / per-task route / pause-abort / digest | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | **Tailscale SSH** | Live heartbeat, logs, pause/abort/skip | Install Tailscale on Jetson + phone/laptop |
 
-Recommended: **Tailscale** on the Jetson (always-on SSH from your phone). Notion is the task board; Telegram is the pager; **`./scripts/ui.sh`** is the live control panel ([ui.md](ui.md)).
+Recommended: **Tailscale** on the Jetson (always-on SSH + dashboard from your phone). Notion is the task board; Telegram is the pager; **`./scripts/ui.sh --remote`** is the live control panel ([ui.md](ui.md)). Continuous daytime coding is documented in [continuous.md](continuous.md).
 
 ```bash
 # On Jetson (one-time)
@@ -23,12 +23,25 @@ Then from anywhere:
 ```bash
 ssh jetson
 cd /opt/autocode   # or your clone path
-./scripts/ui.sh                 # dashboard on the Jetson
+./scripts/ui.sh --remote        # dashboard on Tailscale IP
 # or tunnel from your laptop:
 #   ssh -L 8787:127.0.0.1:8787 jetson
 ./scripts/status.sh
-tail -f logs/nightly-*.log
+tail -f logs/nightly-*.log logs/worker-*.log
 ```
+
+## Always-on coding (not just overnight)
+
+```bash
+# in .env after a supervised run
+AUTOCODE_AUTOPILOT_ENABLED=1
+AUTOCODE_CONTINUOUS_ENABLED=1
+
+./cron/install_autopilot_timers.sh
+# overnight @ 01:00 + worker every ~30 min + UI service
+```
+
+Details: [continuous.md](continuous.md)
 
 ## Live status
 

@@ -162,9 +162,14 @@ fi
 
 # Autopilot safety
 if [[ "${AUTOCODE_AUTOPILOT_ENABLED:-0}" == "1" ]]; then
-  pass "AUTOCODE_AUTOPILOT_ENABLED=1 (timer allowed)"
+  pass "AUTOCODE_AUTOPILOT_ENABLED=1 (timers allowed)"
 else
-  warn_msg "AUTOCODE_AUTOPILOT_ENABLED!=1 — timer will no-op until you enable it"
+  warn_msg "AUTOCODE_AUTOPILOT_ENABLED!=1 — timers will no-op until you enable it"
+fi
+if [[ "${AUTOCODE_CONTINUOUS_ENABLED:-0}" == "1" ]]; then
+  pass "AUTOCODE_CONTINUOUS_ENABLED=1 (daytime worker on)"
+else
+  warn_msg "AUTOCODE_CONTINUOUS_ENABLED!=1 — only overnight 01:00 batch (see docs/continuous.md)"
 fi
 
 # Remote ops

@@ -46,9 +46,9 @@
     if (snap.stuck) return "Heartbeat is stale while a task is running — it may be stuck.";
     switch (st.phase) {
       case "idle":
-        return "Idle. Add Ready tasks in Notion, or run a mock night to try the loop.";
+        return "Idle. Add Ready tasks in Notion, run a work cycle, or try a mock night.";
       case "starting":
-        return "Night is starting…";
+        return "Work cycle is starting…";
       case "routing":
         return `Choosing a route for ${st.task_id || "the next task"}…`;
       case "running_local":
@@ -56,9 +56,9 @@
       case "escalating":
         return `Escalating ${st.task_id || "a task"} to ${st.route || "cloud / human"}.`;
       case "done":
-        return "Night finished.";
+        return "Cycle finished.";
       case "aborted":
-        return "Night aborted.";
+        return "Cycle aborted.";
       default:
         return st.detail || `Phase: ${st.phase || "unknown"}`;
     }
@@ -102,6 +102,7 @@
       `profile=${data.cost_profile || "?"}`,
       data.local_only ? "local-only" : "cloud escalate on",
       data.autopilot ? "autopilot ON" : "autopilot off",
+      data.continuous ? "continuous ON" : "continuous off",
     ];
     document.getElementById("readyMeta").textContent = bits.join(" · ");
   }
@@ -112,18 +113,24 @@
   }
 
   async function refresh() {
-    const [snap, ready, logs, demo] = await Promise.all([
+    const [snap, ready, logs, demo, work] = await Promise.all([
       get("/api/status"),
       get("/api/ready"),
       get("/api/logs"),
       get("/api/demo"),
+      get("/api/work"),
     ]);
     renderStatus(snap);
     renderReady(ready);
     renderLogs(logs);
     const demoBtn = document.getElementById("demoBtn");
-    demoBtn.disabled = !!demo.running;
+    const workBtn = document.getElementById("workBtn");
+    demoBtn.disabled = !!demo.running || !!work.running;
     demoBtn.textContent = demo.running ? "Mock night running…" : "Run mock night";
+    if (workBtn) {
+      workBtn.disabled = !!work.running || !!demo.running;
+      workBtn.textContent = work.running ? "Work cycle running…" : "Run work cycle";
+    }
   }
 
   document.querySelectorAll("[data-action]").forEach((btn) => {
@@ -167,6 +174,22 @@
       btn.disabled = false;
     }
   });
+
+  const workBtnEl = document.getElementById("workBtn");
+  if (workBtnEl) {
+    workBtnEl.addEventListener("click", async () => {
+      const btn = workBtnEl;
+      btn.disabled = true;
+      try {
+        await post("/api/work", { force: true });
+        toast("Work cycle started");
+        await refresh();
+      } catch (e) {
+        toast(String(e.message || e));
+        btn.disabled = false;
+      }
+    });
+  }
 
   refresh().catch((e) => toast(String(e.message || e)));
   setInterval(() => { refresh().catch(() => {}); }, 2500);

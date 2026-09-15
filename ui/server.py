@@ -40,6 +40,9 @@ TOKEN = secrets.token_urlsafe(24)
 _demo_lock = threading.Lock()
 _demo_proc: subprocess.Popen[str] | None = None
 _demo_log = STATE / "ui-demo.log"
+_work_lock = threading.Lock()
+_work_proc: subprocess.Popen[str] | None = None
+_work_log = STATE / "ui-work.log"
 
 
 def load_dotenv() -> None:
@@ -130,7 +133,14 @@ def readiness() -> dict[str, Any]:
             "id": "autopilot",
             "label": "Autopilot enabled",
             "ok": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
-            "hint": "Set AUTOCODE_AUTOPILOT_ENABLED=1 after a supervised night",
+            "hint": "Set AUTOCODE_AUTOPILOT_ENABLED=1 after a supervised run",
+            "optional": True,
+        },
+        {
+            "id": "continuous",
+            "label": "Continuous daytime coding",
+            "ok": env_truthy("AUTOCODE_CONTINUOUS_ENABLED"),
+            "hint": "Set AUTOCODE_CONTINUOUS_ENABLED=1 for ~30min work cycles",
             "optional": True,
         },
     ]
@@ -138,6 +148,7 @@ def readiness() -> dict[str, Any]:
         "ready": all(c["ok"] for c in checks if not c.get("optional")),
         "local_only": local_only,
         "autopilot": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
+        "continuous": env_truthy("AUTOCODE_CONTINUOUS_ENABLED"),
         "checks": checks,
         "details": details,
         "cost_profile": os.environ.get("AUTOCODE_COST_PROFILE", "cursor-grok"),
@@ -210,6 +221,43 @@ def start_demo() -> dict[str, Any]:
         )
         ops.telegram_notify("Autocode UI: mock demo night started")
     return {"ok": True, **demo_state()}
+
+
+def work_state() -> dict[str, Any]:
+    with _work_lock:
+        running = _work_proc is not None and _work_proc.poll() is None
+        code = None if _work_proc is None else _work_proc.poll()
+    return {
+        "running": running,
+        "exit_code": code,
+        "log": str(_work_log.relative_to(ROOT)) if _work_log.exists() else None,
+    }
+
+
+def start_work_cycle(force: bool = True) -> dict[str, Any]:
+    """Kick a live (or mock) continuous work cycle from the UI."""
+    global _work_proc
+    with _work_lock:
+        if _work_proc is not None and _work_proc.poll() is None:
+            return {"ok": False, "error": "Work cycle already running", **work_state()}
+        if _demo_proc is not None and _demo_proc.poll() is None:
+            return {"ok": False, "error": "Demo is running — wait or abort", **work_state()}
+        STATE.mkdir(parents=True, exist_ok=True)
+        logf = _work_log.open("w")
+        script = ROOT / "cron" / "worker_run.sh"
+        cmd = [str(script)]
+        if force:
+            cmd.append("--force")
+        _work_proc = subprocess.Popen(
+            cmd, cwd=ROOT, stdout=logf, stderr=subprocess.STDOUT, text=True, env={**os.environ}
+        )
+        ops.write_status(
+            phase="starting",
+            detail="UI started work cycle",
+            night_id=f"ui-work-{int(time.time())}",
+        )
+        ops.telegram_notify("Autocode UI: work cycle started")
+    return {"ok": True, **work_state()}
 
 
 def apply_control(action: str, note: str = "", task_id: str = "") -> dict[str, Any]:
@@ -287,6 +335,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*json_response(latest_log_tail()))
         if path == "/api/demo":
             return self._send(*json_response(demo_state()))
+        if path == "/api/work":
+            return self._send(*json_response(work_state()))
         if path == "/api/token":
             return self._send(*json_response({"token": TOKEN}))
         self._send(*json_response({"error": "not found"}, 404))
@@ -308,6 +358,9 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/demo":
             return self._send(*json_response(start_demo()))
+        if path == "/api/work":
+            force = str(data.get("force", "1")).lower() not in ("0", "false", "no")
+            return self._send(*json_response(start_work_cycle(force=force)))
         self._send(*json_response({"ok": False, "error": "not found"}, 404))
 
     def _static(self, name: str, content_type: str) -> None:

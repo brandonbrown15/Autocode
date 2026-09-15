@@ -42,12 +42,14 @@ Optional: big SSD (4TB). `./start` will try to use it automatically.
 | Do this | Command |
 |---------|---------|
 | Open the dashboard | `./scripts/ui.sh` → http://127.0.0.1:8787/ |
+| Remote phone view | `./scripts/ui.sh --remote` (Tailscale) |
+| Always-on coding | set `AUTOCODE_CONTINUOUS_ENABLED=1` + `./cron/install_autopilot_timers.sh` |
 | See if it is healthy | `./scripts/doctor.sh` |
 | See what it is doing | `./scripts/status.sh` |
 | Pause it | `./scripts/control.sh pause` |
 | Add work | Notion → Build Queue → Status = **Ready** |
 
-Keep the first tasks tiny (fix typos, small docs).
+Keep the first tasks tiny (fix typos, small docs). More: [docs/continuous.md](docs/continuous.md) · [docs/ui.md](docs/ui.md)
 
 ---
 
