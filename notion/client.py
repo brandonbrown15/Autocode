@@ -112,25 +112,23 @@ def page_prop_text(page: dict[str, Any], name: str) -> str:
     return "".join(part.get("plain_text", "") for part in rich)
 
 
+def set_task_status(page_id: str, status: str, pr_url: str | None = None) -> None:
+    props: dict[str, Any] = {"Status": {"select": {"name": status}}}
+    if pr_url:
+        props["Branch / PR"] = {"url": pr_url}
+    notion_request("PATCH", f"/pages/{page_id}", {"properties": props})
+
+
 def claim_task(page_id: str) -> None:
-    notion_request(
-        "PATCH",
-        f"/pages/{page_id}",
-        {"properties": {"Status": {"select": {"name": "Running"}}}},
-    )
+    set_task_status(page_id, "Running")
 
 
 def mark_needs_review(page_id: str, pr_url: str) -> None:
-    notion_request(
-        "PATCH",
-        f"/pages/{page_id}",
-        {
-            "properties": {
-                "Status": {"select": {"name": "Needs review"}},
-                "Branch / PR": {"url": pr_url},
-            }
-        },
-    )
+    set_task_status(page_id, "Needs review", pr_url=pr_url)
+
+
+def mark_blocked(page_id: str) -> None:
+    set_task_status(page_id, "Blocked")
 
 
 def log_agent_run(

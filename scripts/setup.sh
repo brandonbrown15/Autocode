@@ -58,12 +58,15 @@ check_layout() {
     hermes/configure_local_primary.sh
     notion/client.py
     notion/ids.example.yaml
+    orchestrator/run_night.py
     cron/overnight_run.sh
     cron/install_autopilot_timers.sh
     docs/notion-setup.md
     docs/security.md
     docs/guardrails.md
     docs/supervised-first-run.md
+    docs/routing.md
+    scripts/demo_night.sh
   )
   local missing=0
   for f in "${required[@]}"; do

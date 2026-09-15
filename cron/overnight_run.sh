@@ -16,16 +16,14 @@ LOG="$LOG_DIR/nightly-${STAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "== Autocode overnight run @ $STAMP =="
-echo "max_tasks=${AUTOCODE_MAX_TASKS_PER_NIGHT:-2} wall=${AUTOCODE_MAX_WALL_MINUTES:-90}m"
+echo "max_tasks=${AUTOCODE_MAX_TASKS_PER_NIGHT:-2} wall=${AUTOCODE_MAX_WALL_MINUTES:-90}m attempts=${AUTOCODE_MAX_LOCAL_ATTEMPTS:-2}"
 
-if [[ -z "${NOTION_TOKEN:-}" ]]; then
-  echo "NOTION_TOKEN unset — aborting (configure local .env)."
+EXTRA=("$@")
+
+# Live mode needs Notion; mock/demo does not.
+if [[ " ${EXTRA[*]} " != *" --mock "* && -z "${NOTION_TOKEN:-}" ]]; then
+  echo "NOTION_TOKEN unset — aborting (configure local .env) or pass --mock"
   exit 1
-fi
-
-EXTRA=()
-if [[ "${1:-}" == "--dry-run" ]]; then
-  EXTRA+=(--dry-run)
 fi
 
 python3 "$ROOT/orchestrator/run_night.py" "${EXTRA[@]}"

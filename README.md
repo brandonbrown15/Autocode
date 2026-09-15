@@ -65,12 +65,13 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 ## Independent overnight loop
 
 ```bash
-./cron/overnight_run.sh           # live
-./cron/overnight_run.sh --dry-run # route only
-# or: python3 orchestrator/run_night.py --dry-run
+./scripts/demo_night.sh           # simulate full night (no Jetson/Notion needed)
+./cron/overnight_run.sh --dry-run # route only against live Notion
+./cron/overnight_run.sh           # live overnight
+python3 orchestrator/run_night.py --mock
 ```
 
-Local Hermes handles Local-safe work. When the task is Cloud-only, the Jetson is out of RAM, or local fails, Autocode **delegates** to Cursor Cloud / Claude / Grok (see [docs/routing.md](docs/routing.md)).
+Local Hermes handles Local-safe work (with retries). When the task is Cloud-only, the Jetson is out of RAM/disk, Ollama/Hermes is down, or local fails twice, Autocode **delegates** to Cursor Cloud / Claude / Grok (see [docs/routing.md](docs/routing.md)).
 
 ## Guardrails
 
@@ -84,6 +85,7 @@ Details: [docs/guardrails.md](docs/guardrails.md) · [docs/security.md](docs/sec
 ## Docs
 
 - [Notion setup](docs/notion-setup.md) — recreate databases in *your* workspace
+- [Routing / escalation](docs/routing.md) — local vs cloud decision tree
 - [Architecture](docs/architecture.md)
 - [Jetson notes](docs/jetson.md)
 - [Contributing](CONTRIBUTING.md)

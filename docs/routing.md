@@ -15,14 +15,17 @@ Ready task
 ## Local path
 
 1. Claim task (`Status = Running`)
-2. Create branch `hermes/<task-id>-slug`
-3. Run Hermes against local Ollama `coder-64k`
-4. Open PR with `gh` when possible
-5. Mark **Needs review** + log **Agent Runs**
+2. Health-check Hermes + Ollama (else escalate)
+3. Create branch `hermes/<task-id>-slug`
+4. Run Hermes against local Ollama `coder-64k` (up to `AUTOCODE_MAX_LOCAL_ATTEMPTS`)
+5. Run detected repo checks (`pytest` / `npm test` / …)
+6. Open PR with `gh` when possible
+7. Mark **Needs review** + log **Agent Runs**
 
 ## Escalation / delegation
 
 Writes **Escalation Log** and a JSON payload under `state/delegates/` for a cloud agent.
+If the target is **Human**, the Build Queue item is marked **Blocked**.
 
 | Target | Trigger / config |
 |--------|------------------|

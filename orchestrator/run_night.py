@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Autocode overnight orchestrator — local-first coding with cloud escalation."""
+"""Autocode overnight orchestrator — local-first coding with cloud escalation.
+
+Works independently:
+  Ready Notion tasks → route → local Hermes (with retries) OR cloud agent delegate.
+Use --mock to simulate a full night without Notion/Hermes/hardware.
+"""
 
 from __future__ import annotations
 
@@ -15,12 +20,14 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from notion import client as notion  # noqa: E402
+from orchestrator.checks import run_repo_checks  # noqa: E402
+from orchestrator.health import check_local_stack  # noqa: E402
 
 
 @dataclass
@@ -69,9 +76,11 @@ class HardwareSnapshot:
     notes: list[str] = field(default_factory=list)
 
     def too_constrained_for_local(self) -> bool:
-        if self.mem_available_mb < 2500:
+        min_ram = env_int("AUTOCODE_MIN_RAM_MB", 2500)
+        min_disk = float(os.environ.get("AUTOCODE_MIN_DISK_GB", "5"))
+        if self.mem_available_mb < min_ram:
             return True
-        if self.disk_free_gb < 5:
+        if self.disk_free_gb < min_disk:
             return True
         cpus = os.cpu_count() or 4
         return self.load1 > max(8.0, cpus * 2)
@@ -86,6 +95,54 @@ class RunResult:
     branch: str | None = None
     escalated_to: str | None = None
     why: str | None = None
+
+
+class NotionSink:
+    """Real Notion API adapter (or mock)."""
+
+    def claim(self, page_id: str) -> None:
+        notion.claim_task(page_id)
+
+    def needs_review(self, page_id: str, pr_url: str) -> None:
+        notion.mark_needs_review(page_id, pr_url)
+
+    def blocked(self, page_id: str) -> None:
+        notion.mark_blocked(page_id)
+
+    def log_run(self, name: str, outcome: str, summary: str, model: str = "Local", pr: str | None = None) -> None:
+        notion.log_agent_run(name, outcome, summary, model, pr)
+
+    def escalate(self, name: str, why: str, context: str, send_to: str = "Human", pr: str | None = None) -> None:
+        notion.write_escalation(name, why, context, send_to=send_to, related_pr=pr)
+
+
+class MockNotionSink(NotionSink):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.events: list[dict[str, Any]] = []
+
+    def _write(self, kind: str, **kwargs: Any) -> None:
+        row = {"kind": kind, "ts": datetime.now(timezone.utc).isoformat(), **kwargs}
+        self.events.append(row)
+        with self.path.open("a") as f:
+            f.write(json.dumps(row) + "\n")
+        print(f"[mock-notion] {kind}: {kwargs}")
+
+    def claim(self, page_id: str) -> None:
+        self._write("claim", page_id=page_id)
+
+    def needs_review(self, page_id: str, pr_url: str) -> None:
+        self._write("needs_review", page_id=page_id, pr_url=pr_url)
+
+    def blocked(self, page_id: str) -> None:
+        self._write("blocked", page_id=page_id)
+
+    def log_run(self, name: str, outcome: str, summary: str, model: str = "Local", pr: str | None = None) -> None:
+        self._write("agent_run", name=name, outcome=outcome, summary=summary, model=model, pr=pr)
+
+    def escalate(self, name: str, why: str, context: str, send_to: str = "Human", pr: str | None = None) -> None:
+        self._write("escalation", name=name, why=why, context=context, send_to=send_to, pr=pr)
 
 
 def env_int(name: str, default: int) -> int:
@@ -168,9 +225,35 @@ def route_task(task: Task, hw: HardwareSnapshot, local_failures: int) -> str:
         return preferred_cloud_target(task)
     if hw.too_constrained_for_local():
         return preferred_cloud_target(task)
-    if task.complexity == "Maybe local" and hw.mem_available_mb < 4000:
+    if task.complexity == "Maybe local" and hw.mem_available_mb < env_int("AUTOCODE_MAYBE_LOCAL_MIN_RAM_MB", 4000):
         return preferred_cloud_target(task)
     return "local"
+
+
+def attempts_path(task_id: str) -> Path:
+    p = ROOT / "state" / "attempts"
+    p.mkdir(parents=True, exist_ok=True)
+    return p / f"{task_id}.json"
+
+
+def load_attempts(task_id: str) -> int:
+    path = attempts_path(task_id)
+    if not path.exists():
+        return 0
+    try:
+        return int(json.loads(path.read_text()).get("failures", 0))
+    except (json.JSONDecodeError, ValueError, OSError):
+        return 0
+
+
+def save_attempts(task_id: str, failures: int) -> None:
+    attempts_path(task_id).write_text(json.dumps({"failures": failures, "updated": datetime.now(timezone.utc).isoformat()}))
+
+
+def clear_attempts(task_id: str) -> None:
+    path = attempts_path(task_id)
+    if path.exists():
+        path.unlink()
 
 
 def workspace_for_repo(repo: str) -> Path:
@@ -245,11 +328,36 @@ def maybe_open_pr(repo_dir: Path, branch: str, task: Task) -> str | None:
     return url if url.startswith("http") else None
 
 
-def run_local_hermes(task: Task, repo_dir: Path, branch: str, wall_minutes: int) -> RunResult:
+def run_local_hermes(
+    task: Task,
+    repo_dir: Path,
+    branch: str,
+    wall_minutes: int,
+    mock: bool = False,
+) -> RunResult:
     prompt = build_prompt(task, branch)
     state = ROOT / "state"
     state.mkdir(parents=True, exist_ok=True)
     (state / f"prompt-{task.task_id}.txt").write_text(prompt)
+
+    if mock:
+        marker = repo_dir / "AUTOCODE_MOCK_CHANGE.md"
+        marker.write_text(f"# Mock change for {task.task_id}\n\n{task.acceptance}\n")
+        ok, check_log = run_repo_checks(repo_dir)
+        pr_url = maybe_open_pr(repo_dir, branch, task) or f"https://example.invalid/pr/{task.task_id}"
+        if not ok:
+            return RunResult(
+                outcome="Failed",
+                summary=f"Mock local change but checks failed:\n{check_log}",
+                branch=branch,
+                why="Tests failing",
+            )
+        return RunResult(
+            outcome="Success",
+            summary=f"Mock local Hermes success; PR {pr_url}",
+            pr_url=pr_url,
+            branch=branch,
+        )
 
     hermes = shutil.which("hermes")
     if not hermes:
@@ -294,6 +402,16 @@ def run_local_hermes(task: Task, repo_dir: Path, branch: str, wall_minutes: int)
             why="Too complex",
         )
 
+    ok, check_log = run_repo_checks(repo_dir)
+    (state / f"checks-{task.task_id}.log").write_text(check_log)
+    if not ok:
+        return RunResult(
+            outcome="Failed",
+            summary=f"Repo checks failed:\n{check_log[-1500:]}",
+            branch=branch,
+            why="Tests failing",
+        )
+
     pr_url = maybe_open_pr(repo_dir, branch, task)
     if pr_url:
         return RunResult(
@@ -329,30 +447,35 @@ def write_delegate_payload(task: Task, target: str, why: str, context: str) -> P
         "why": why,
         "context": context,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "branch_hint": f"{os.environ.get('AUTOCODE_BRANCH_PREFIX', 'hermes')}/{task.task_id.lower()}-{slugify(task.name)}",
         "instructions": (
             "Cloud agent: implement acceptance criteria on a feature branch, "
-            "open a PR, never merge main, never invent secrets."
+            "open a PR, never merge main, never invent secrets. "
+            "Prefer the smallest change that satisfies acceptance."
         ),
     }
     path.write_text(json.dumps(payload, indent=2))
     return path
 
 
-def anthropic_ping(task: Task, context: str) -> None:
+def cloud_coding_prompt(task: Task, context: str) -> str:
+    return (
+        f"Autocode delegated this task because local Jetson capacity was insufficient "
+        f"or the task is marked for cloud.\n\n"
+        f"Task: {task.task_id} — {task.name}\n"
+        f"Repo: {task.repo}\n"
+        f"Acceptance:\n{task.acceptance}\n\n"
+        f"Context:\n{context[:3000]}\n\n"
+        f"Implement on a feature branch, open a PR, do not merge main, do not invent secrets."
+    )
+
+
+def anthropic_delegate(task: Task, context: str) -> str:
     api_key = os.environ["ANTHROPIC_API_KEY"]
     body = {
         "model": os.environ.get("AUTOCODE_CLAUDE_MODEL", "claude-sonnet-4-20250514"),
-        "max_tokens": 256,
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    f"Autocode escalation for {task.task_id}: {task.name}\n"
-                    f"Acceptance: {task.acceptance}\nContext: {context[:1500]}\n"
-                    "Acknowledge receipt in one short sentence."
-                ),
-            }
-        ],
+        "max_tokens": int(os.environ.get("AUTOCODE_CLAUDE_MAX_TOKENS", "1024")),
+        "messages": [{"role": "user", "content": cloud_coding_prompt(task, context)}],
     }
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
@@ -364,8 +487,35 @@ def anthropic_ping(task: Task, context: str) -> None:
             "content-type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        resp.read()
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+    parts = data.get("content", [])
+    text = " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    return text[:2000] or "Claude acknowledged escalation"
+
+
+def openrouter_delegate(task: Task, context: str) -> str:
+    api_key = os.environ["OPENROUTER_API_KEY"]
+    model = os.environ.get("AUTOCODE_OPENROUTER_MODEL", "x-ai/grok-2")
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a coding agent receiving an Autocode escalation."},
+            {"role": "user", "content": cloud_coding_prompt(task, context)},
+        ],
+    }
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+    return data["choices"][0]["message"]["content"][:2000]
 
 
 def model_label_for_target(target: str) -> str:
@@ -377,8 +527,23 @@ def model_label_for_target(target: str) -> str:
     }.get(target, "Mixed")
 
 
-def invoke_cloud_delegate(task: Task, target: str, why: str, context: str) -> RunResult:
+def invoke_cloud_delegate(
+    task: Task,
+    target: str,
+    why: str,
+    context: str,
+    mock: bool = False,
+) -> RunResult:
     payload_path = write_delegate_payload(task, target, why, context)
+
+    if mock:
+        return RunResult(
+            outcome="Escalated",
+            summary=f"[mock] Escalated to {target}; payload {payload_path}",
+            model_used=model_label_for_target(target),
+            escalated_to=target,
+            why=why,
+        )
 
     custom = os.environ.get("AUTOCODE_CURSOR_DELEGATE_CMD", "").strip()
     if target == "Cursor Cloud" and custom:
@@ -403,16 +568,31 @@ def invoke_cloud_delegate(task: Task, target: str, why: str, context: str) -> Ru
 
     if target == "Claude" and os.environ.get("ANTHROPIC_API_KEY"):
         try:
-            anthropic_ping(task, context)
+            reply = anthropic_delegate(task, context)
+            (ROOT / "state" / f"claude-{task.task_id}.txt").write_text(reply)
             return RunResult(
                 outcome="Escalated",
-                summary=f"Escalation logged + Anthropic notify; {payload_path}",
+                summary=f"Delegated to Claude; payload {payload_path}; reply_len={len(reply)}",
                 model_used="Claude",
                 escalated_to=target,
                 why=why,
             )
         except Exception as e:  # noqa: BLE001
-            context = f"{context}\nAnthropic notify failed: {e}"
+            context = f"{context}\nClaude delegate failed: {e}"
+
+    if target == "Grok Bot" and os.environ.get("OPENROUTER_API_KEY"):
+        try:
+            reply = openrouter_delegate(task, context)
+            (ROOT / "state" / f"grok-{task.task_id}.txt").write_text(reply)
+            return RunResult(
+                outcome="Escalated",
+                summary=f"Delegated via OpenRouter; payload {payload_path}; reply_len={len(reply)}",
+                model_used="Grok",
+                escalated_to=target,
+                why=why,
+            )
+        except Exception as e:  # noqa: BLE001
+            context = f"{context}\nOpenRouter delegate failed: {e}"
 
     return RunResult(
         outcome="Escalated",
@@ -423,31 +603,54 @@ def invoke_cloud_delegate(task: Task, target: str, why: str, context: str) -> Ru
     )
 
 
-def process_task(task: Task, hw: HardwareSnapshot, digest: list[str]) -> RunResult:
+def process_task(
+    task: Task,
+    hw: HardwareSnapshot,
+    digest: list[str],
+    sink: NotionSink,
+    mock: bool = False,
+) -> RunResult:
     prefix = os.environ.get("AUTOCODE_BRANCH_PREFIX", "hermes")
     branch = f"{prefix}/{task.task_id.lower()}-{slugify(task.name)}"
     wall = env_int("AUTOCODE_MAX_WALL_MINUTES", 90)
+    max_attempts = env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2)
 
-    route = route_task(task, hw, local_failures=0)
-    notion.claim_task(task.page_id)
+    prior_failures = 0 if mock else load_attempts(task.task_id)
+    route = route_task(task, hw, local_failures=prior_failures)
+    sink.claim(task.page_id)
+
+    # Local stack health gate
+    if route == "local" and not mock:
+        health = check_local_stack()
+        print("Local health:", "; ".join(health.details))
+        if not health.local_ready:
+            route = preferred_cloud_target(task)
+            prior_failures = max_attempts  # force escalate path messaging
 
     if route != "local":
         why = "Tool fail" if hw.too_constrained_for_local() else "Too complex"
         context = (
             f"Routed to {route} (complexity={task.complexity}, "
-            f"model_route={task.model_route}, hw={asdict(hw)})"
+            f"model_route={task.model_route}, prior_failures={prior_failures}, hw={asdict(hw)})"
         )
-        result = invoke_cloud_delegate(task, route, why, context)
-        notion.write_escalation(
-            task.name, why, result.summary, send_to=result.escalated_to or route
-        )
-        notion.log_agent_run(
-            task.name, result.outcome, result.summary, result.model_used, result.pr_url
-        )
+        result = invoke_cloud_delegate(task, route, why, context, mock=mock)
+        sink.escalate(task.name, why, result.summary, send_to=result.escalated_to or route)
+        sink.log_run(task.name, result.outcome, result.summary, result.model_used, result.pr_url)
+        if result.escalated_to == "Human":
+            sink.blocked(task.page_id)
         digest.append(f"ESCALATED {task.task_id} → {route}: {task.name}")
         return result
 
     repo_dir = workspace_for_repo(task.repo)
+    if mock and not repo_dir.exists():
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "autocode@mock"], cwd=repo_dir, check=False)
+        subprocess.run(["git", "config", "user.name", "Autocode Mock"], cwd=repo_dir, check=False)
+        (repo_dir / "README.md").write_text("# mock repo\n")
+        subprocess.run(["git", "add", "."], cwd=repo_dir, check=False)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=False)
+
     if not repo_dir.exists():
         target = preferred_cloud_target(task)
         result = invoke_cloud_delegate(
@@ -455,9 +658,12 @@ def process_task(task: Task, hw: HardwareSnapshot, digest: list[str]) -> RunResu
             target,
             "Tool fail",
             f"Workspace missing: {repo_dir}. Clone WORKSPACE_REPOS first.",
+            mock=mock,
         )
-        notion.write_escalation(task.name, "Tool fail", result.summary, send_to=target)
-        notion.log_agent_run(task.name, result.outcome, result.summary, result.model_used)
+        sink.escalate(task.name, "Tool fail", result.summary, send_to=target)
+        sink.log_run(task.name, result.outcome, result.summary, result.model_used)
+        if target == "Human":
+            sink.blocked(task.page_id)
         digest.append(f"ESCALATED {task.task_id} (missing repo): {task.name}")
         return result
 
@@ -470,31 +676,68 @@ def process_task(task: Task, hw: HardwareSnapshot, digest: list[str]) -> RunResu
             why="Tool fail",
             branch=branch,
         )
-        notion.write_escalation(task.name, "Tool fail", result.summary, send_to="Human")
-        notion.log_agent_run(task.name, result.outcome, result.summary)
+        sink.escalate(task.name, "Tool fail", result.summary, send_to="Human")
+        sink.log_run(task.name, result.outcome, result.summary)
+        sink.blocked(task.page_id)
         digest.append(f"FAILED {task.task_id} git: {task.name}")
         return result
 
-    result = run_local_hermes(task, repo_dir, branch, wall)
+    # Local attempts with retry
+    failures = prior_failures
+    last: RunResult | None = None
+    while failures < max_attempts:
+        last = run_local_hermes(task, repo_dir, branch, wall, mock=mock)
+        if last.outcome in ("Success", "Partial"):
+            clear_attempts(task.task_id)
+            if last.pr_url and last.outcome == "Success":
+                sink.needs_review(task.page_id, last.pr_url)
+            sink.log_run(task.name, last.outcome, last.summary, last.model_used, last.pr_url)
+            digest.append(
+                f"{last.outcome.upper()} {task.task_id}: {task.name} {last.pr_url or ''}".strip()
+            )
+            return last
+        failures += 1
+        save_attempts(task.task_id, failures)
+        print(f"Local attempt {failures}/{max_attempts} failed: {last.summary[:200]}")
+        if failures < max_attempts:
+            time.sleep(2)
 
-    if result.outcome == "Failed":
-        target = preferred_cloud_target(task)
-        why = result.why or "Too complex"
-        esc = invoke_cloud_delegate(task, target, why, result.summary)
-        notion.write_escalation(task.name, why, esc.summary, send_to=target)
-        notion.log_agent_run(task.name, "Escalated", esc.summary, esc.model_used)
-        digest.append(f"ESCALATED {task.task_id} after local fail → {target}")
-        return esc
+    assert last is not None
+    target = preferred_cloud_target(task)
+    why = last.why or "Too complex"
+    esc = invoke_cloud_delegate(task, target, why, last.summary, mock=mock)
+    sink.escalate(task.name, why, esc.summary, send_to=target)
+    sink.log_run(task.name, "Escalated", esc.summary, esc.model_used)
+    if target == "Human":
+        sink.blocked(task.page_id)
+    clear_attempts(task.task_id)
+    digest.append(f"ESCALATED {task.task_id} after {failures} local fails → {target}")
+    return esc
 
-    if result.pr_url:
-        notion.mark_needs_review(task.page_id, result.pr_url)
-    notion.log_agent_run(
-        task.name, result.outcome, result.summary, result.model_used, result.pr_url
-    )
-    digest.append(
-        f"{result.outcome.upper()} {task.task_id}: {task.name} {result.pr_url or ''}".strip()
-    )
-    return result
+
+def mock_tasks() -> list[Task]:
+    return [
+        Task(
+            page_id="mock-local-1",
+            task_id="BLD-101",
+            name="Docs typo fix",
+            acceptance="Add a short note file documenting Autocode mock run.",
+            complexity="Local-safe",
+            model_route="Local Hermes",
+            repo="mock-app",
+            priority="P1",
+        ),
+        Task(
+            page_id="mock-cloud-1",
+            task_id="BLD-102",
+            name="Auth redesign",
+            acceptance="Redesign auth architecture across services.",
+            complexity="Cloud-only",
+            model_route="Cursor Cloud",
+            repo="mock-app",
+            priority="P0",
+        ),
+    ]
 
 
 def send_digest(path: Path) -> None:
@@ -506,21 +749,33 @@ def send_digest(path: Path) -> None:
 def main() -> None:
     notion.load_dotenv()
     parser = argparse.ArgumentParser(description="Autocode overnight orchestrator")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="Route only; no claim/execute")
+    parser.add_argument("--mock", action="store_true", help="Simulate full night without Notion/Hermes")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--force-low-ram", action="store_true", help="Simulate constrained hardware")
     args = parser.parse_args()
 
     max_tasks = args.limit or env_int("AUTOCODE_MAX_TASKS_PER_NIGHT", 2)
     hw = probe_hardware()
+    if args.force_low_ram:
+        hw = HardwareSnapshot(512, hw.mem_total_mb, hw.disk_free_gb, hw.load1, hw.is_jetson, hw.notes + ["forced low RAM"])
     print(f"Hardware: {asdict(hw)}")
 
-    if not os.environ.get("NOTION_TOKEN"):
-        raise SystemExit("NOTION_TOKEN required (set in local .env)")
-
-    tasks = query_ready_tasks(limit=max_tasks)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     digest_path = ROOT / "state" / f"digest-{stamp}.txt"
     digest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.mock:
+        os.environ.setdefault("AUTOCODE_CURSOR_DELEGATE_CMD", str(ROOT / "scripts" / "delegate_cursor_stub.sh"))
+        sink: NotionSink = MockNotionSink(ROOT / "state" / "mock_notion.jsonl")
+        tasks = mock_tasks()
+        # Put workspace under state for mock
+        os.environ["WORKSPACE_ROOT"] = str(ROOT / "state" / "mock_workspaces")
+    else:
+        if not os.environ.get("NOTION_TOKEN"):
+            raise SystemExit("NOTION_TOKEN required (or pass --mock)")
+        sink = NotionSink()
+        tasks = query_ready_tasks(limit=max_tasks)
 
     if not tasks:
         print("No Ready tasks.")
@@ -530,15 +785,17 @@ def main() -> None:
 
     digest: list[str] = [f"Autocode digest {datetime.now(timezone.utc).isoformat()}"]
     for task in tasks[:max_tasks]:
-        route = route_task(task, hw, 0)
-        print(f"Task {task.task_id} {task.name!r} → route={route}")
-        if args.dry_run:
+        prior = 0 if args.mock else load_attempts(task.task_id)
+        route = route_task(task, hw, prior)
+        print(f"Task {task.task_id} {task.name!r} → route={route} (prior_failures={prior})")
+        if args.dry_run and not args.mock:
             digest.append(f"DRY-RUN {task.task_id} → {route}")
             continue
-        process_task(task, hw, digest)
+        process_task(task, hw, digest, sink, mock=args.mock)
 
     digest_path.write_text("\n".join(digest) + "\n")
     print(f"Digest: {digest_path}")
+    print("\n".join(digest))
     send_digest(digest_path)
 
 
