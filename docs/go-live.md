@@ -1,23 +1,23 @@
-# Fully automatic go-live (Cursor + Grok Bot)
+# Fully automatic go-live
 
-Goal: Jetson overnight loop that does local Hermes first, then delegates to
-**whichever of Cursor Ultra / Grok Bot is cheaper for that rung**, and only pages you when both fail.
-
-## Fully auto on the Jetson
-
-Put secrets in `.env` once, then run one command:
+## Easiest path (recommended)
 
 ```bash
-git clone https://github.com/brandonbrown15/Autocode.git /opt/autocode
-cd /opt/autocode
-cp .env.example .env
-# edit .env — at minimum:
-#   NOTION_TOKEN=...
-#   NOTION_HUB_PAGE=<empty page shared with the integration>
-#   GITHUB_TOKEN=...          # or run gh auth login once
-#   WORKSPACE_REPOS=owner/repo
-# optional: AUTOCODE_DATA_ROOT=/mnt/nvme/autocode  (4TB SSD)
+git clone https://github.com/brandonbrown15/Autocode.git
+cd Autocode
+./start
+```
 
+That asks a few questions, then installs everything.
+See **[START_HERE.md](../START_HERE.md)**.
+
+---
+
+## Advanced: one-shot without the wizard
+
+Put secrets in `.env` once, then:
+
+```bash
 ./scripts/go_live.sh --local-only --first-night --enable-autopilot
 ```
 

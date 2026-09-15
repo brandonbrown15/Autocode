@@ -73,6 +73,8 @@ check_layout() {
     docs/routing.md
     docs/go-live.md
     docs/hermes-overnight-skill.md
+    START_HERE.md
+    start
     scripts/demo_night.sh
     scripts/bootstrap_jetson.sh
     scripts/go_live.sh
@@ -137,21 +139,11 @@ fi
 
 cat <<'EOF'
 
-Next (Jetson — fully auto once secrets are in .env):
-  # Put NOTION_TOKEN, NOTION_HUB_PAGE, GITHUB_TOKEN, WORKSPACE_REPOS in .env
+Next (easiest):
+  ./start
+
+Or fully auto without prompts (after .env is filled):
   ./scripts/go_live.sh --local-only --first-night --enable-autopilot
-
-  # Or step-by-step:
-  ./scripts/bootstrap_jetson.sh
-  ./scripts/doctor.sh
-  # docs/go-live.md
-
-Manual path:
-  1. docs/notion-setup.md  (or: python3 notion/client.py provision --seed)
-  2. ./ollama/install_ollama_jetson.sh && ./ollama/create_coder_64k.sh
-  3. ./hermes/install_hermes.sh && ./hermes/configure_local_primary.sh
-  4. Optional cloud: CURSOR_WEBHOOK_URL / GROK_BOT_WEBHOOK_URL
-  5. ./scripts/go_live.sh --skip-bootstrap --first-night --enable-autopilot
 
 Never commit .env. Re-run: ./scripts/setup.sh --check
 EOF
