@@ -71,7 +71,7 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 python3 orchestrator/run_night.py --mock
 ```
 
-Local Hermes handles Local-safe work (with retries). When the task is Cloud-only, the Jetson is out of RAM/disk, Ollama/Hermes is down, or local fails twice, Autocode **delegates** to Cursor Cloud / Claude / Grok (see [docs/routing.md](docs/routing.md)).
+Local Hermes handles Local-safe work (with retries). Harder work is scored and sent up a **cost ladder** — Grok (cheap) → Claude (mid-range) → Cursor Cloud (premium) — so mid tasks don’t burn premium models. See [docs/routing.md](docs/routing.md).
 
 ## Guardrails
 

@@ -71,6 +71,25 @@ class OrchestratorMockTests(unittest.TestCase):
         kinds = [e["kind"] for e in self.sink.events]
         self.assertIn("escalation", kinds)
 
+    def test_mid_range_cloud_only_goes_claude_in_mock(self) -> None:
+        os.environ["ANTHROPIC_API_KEY"] = "test-anthropic"
+        os.environ["CURSOR_API_KEY"] = "test-cursor"
+        hw = HardwareSnapshot(8000, 16000, 40.0, 0.2, False)
+        task = Task(
+            page_id="p4",
+            task_id="BLD-204",
+            name="Handler cleanup",
+            acceptance="Tidy one endpoint",
+            complexity="Cloud-only",
+            model_route="Local Hermes",
+            repo="app",
+            priority="P2",
+        )
+        digest: list[str] = []
+        result = process_task(task, hw, digest, self.sink, mock=True)
+        self.assertEqual(result.outcome, "Escalated")
+        self.assertEqual(result.escalated_to, "Claude")
+
     def test_low_ram_forces_escalate(self) -> None:
         hw = HardwareSnapshot(400, 8000, 40.0, 0.2, True)
         task = Task(

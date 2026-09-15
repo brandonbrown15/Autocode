@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 from notion import client as notion  # noqa: E402
 from orchestrator.checks import run_repo_checks  # noqa: E402
 from orchestrator.health import check_local_stack  # noqa: E402
+from orchestrator.policy import decide_route, target_for_tier  # noqa: E402
 
 
 @dataclass
@@ -199,35 +200,48 @@ def query_ready_tasks(limit: int) -> list[Task]:
     return [Task.from_page(p) for p in result.get("results", [])]
 
 
-def preferred_cloud_target(task: Task) -> str:
-    mapping = {
-        "Claude": "Claude",
-        "Grok": "Grok Bot",
-        "Cursor Cloud": "Cursor Cloud",
-    }
-    if task.model_route in mapping:
-        return mapping[task.model_route]
-    if os.environ.get("CURSOR_API_KEY") or os.environ.get("AUTOCODE_CURSOR_DELEGATE_CMD"):
-        return "Cursor Cloud"
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "Claude"
-    if os.environ.get("OPENROUTER_API_KEY") or os.environ.get("XAI_API_KEY"):
-        return "Grok Bot"
-    return "Human"
+def _maybe_local_ram_issue(task: Task, hw: HardwareSnapshot) -> bool:
+    return (
+        task.complexity == "Maybe local"
+        and hw.mem_available_mb < env_int("AUTOCODE_MAYBE_LOCAL_MIN_RAM_MB", 4000)
+    )
+
+
+def preferred_cloud_target(
+    task: Task,
+    *,
+    hw: HardwareSnapshot | None = None,
+    local_failures: int | None = None,
+    local_stack_ok: bool = True,
+) -> str:
+    """Pick the cheapest cloud target this task deserves (not always Cursor)."""
+    max_attempts = env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2)
+    failures = max_attempts if local_failures is None else local_failures
+    constrained = True
+    if hw is not None:
+        constrained = hw.too_constrained_for_local() or _maybe_local_ram_issue(task, hw)
+    decision = decide_route(
+        task,
+        local_failures=max(failures, max_attempts),
+        hardware_constrained=constrained,
+        local_stack_ok=local_stack_ok,
+        max_local_attempts=max_attempts,
+    )
+    if decision.target == "local":
+        return target_for_tier("cheap")
+    return decision.target
 
 
 def route_task(task: Task, hw: HardwareSnapshot, local_failures: int) -> str:
-    if task.complexity == "Cloud-only":
-        return preferred_cloud_target(task)
-    if task.model_route and task.model_route != "Local Hermes":
-        return preferred_cloud_target(task)
-    if local_failures >= env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2):
-        return preferred_cloud_target(task)
-    if hw.too_constrained_for_local():
-        return preferred_cloud_target(task)
-    if task.complexity == "Maybe local" and hw.mem_available_mb < env_int("AUTOCODE_MAYBE_LOCAL_MIN_RAM_MB", 4000):
-        return preferred_cloud_target(task)
-    return "local"
+    """Cost-aware route: local when cheap/safe; else cheapest sufficient cloud model."""
+    decision = decide_route(
+        task,
+        local_failures=local_failures,
+        hardware_constrained=hw.too_constrained_for_local() or _maybe_local_ram_issue(task, hw),
+        local_stack_ok=True,
+        max_local_attempts=env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2),
+    )
+    return decision.target
 
 
 def attempts_path(task_id: str) -> Path:
@@ -677,21 +691,37 @@ def process_task(
     max_attempts = env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2)
 
     prior_failures = 0 if mock else load_attempts(task.task_id)
-    route = route_task(task, hw, local_failures=prior_failures)
+    decision = decide_route(
+        task,
+        local_failures=prior_failures,
+        hardware_constrained=hw.too_constrained_for_local() or _maybe_local_ram_issue(task, hw),
+        local_stack_ok=True,
+        max_local_attempts=max_attempts,
+    )
+    route = decision.target
     sink.claim(task.page_id)
 
-    # Local stack health gate
+    # Local stack health gate — escalate to scored tier, not always premium
     if route == "local" and not mock:
         health = check_local_stack()
         print("Local health:", "; ".join(health.details))
         if not health.local_ready:
-            route = preferred_cloud_target(task)
+            decision = decide_route(
+                task,
+                local_failures=prior_failures,
+                hardware_constrained=hw.too_constrained_for_local()
+                or _maybe_local_ram_issue(task, hw),
+                local_stack_ok=False,
+                max_local_attempts=max_attempts,
+            )
+            route = decision.target if decision.target != "local" else target_for_tier("cheap")
             prior_failures = max_attempts  # force escalate path messaging
 
     if route != "local":
         why = "Tool fail" if hw.too_constrained_for_local() else "Too complex"
         context = (
-            f"Routed to {route} (complexity={task.complexity}, "
+            f"Routed to {route} [score={decision.score} tier={decision.tier}] "
+            f"({decision.reason}; complexity={task.complexity}, "
             f"model_route={task.model_route}, prior_failures={prior_failures}, hw={asdict(hw)})"
         )
         result = invoke_cloud_delegate(task, route, why, context, mock=mock)
@@ -699,7 +729,10 @@ def process_task(
         sink.log_run(task.name, result.outcome, result.summary, result.model_used, result.pr_url)
         if result.escalated_to == "Human":
             sink.blocked(task.page_id)
-        digest.append(f"ESCALATED {task.task_id} → {route}: {task.name}")
+        digest.append(
+            f"ESCALATED {task.task_id} → {route} "
+            f"[score={decision.score}/{decision.tier}]: {task.name}"
+        )
         return result
 
     repo_dir = workspace_for_repo(task.repo)
@@ -713,7 +746,7 @@ def process_task(
         subprocess.run(["git", "commit", "-m", "init"], cwd=repo_dir, check=False)
 
     if not repo_dir.exists():
-        target = preferred_cloud_target(task)
+        target = preferred_cloud_target(task, hw=hw, local_failures=max_attempts)
         result = invoke_cloud_delegate(
             task,
             target,
@@ -725,7 +758,7 @@ def process_task(
         sink.log_run(task.name, result.outcome, result.summary, result.model_used)
         if target == "Human":
             sink.blocked(task.page_id)
-        digest.append(f"ESCALATED {task.task_id} (missing repo): {task.name}")
+        digest.append(f"ESCALATED {task.task_id} (missing repo) → {target}: {task.name}")
         return result
 
     try:
@@ -764,15 +797,35 @@ def process_task(
             time.sleep(2)
 
     assert last is not None
-    target = preferred_cloud_target(task)
+    fail_decision = decide_route(
+        task,
+        local_failures=failures,
+        hardware_constrained=hw.too_constrained_for_local() or _maybe_local_ram_issue(task, hw),
+        local_stack_ok=True,
+        max_local_attempts=max_attempts,
+    )
+    target = (
+        fail_decision.target
+        if fail_decision.target != "local"
+        else preferred_cloud_target(task, hw=hw, local_failures=failures)
+    )
     why = last.why or "Too complex"
-    esc = invoke_cloud_delegate(task, target, why, last.summary, mock=mock)
+    esc = invoke_cloud_delegate(
+        task,
+        target,
+        why,
+        f"{last.summary} | cost policy: {fail_decision.reason}",
+        mock=mock,
+    )
     sink.escalate(task.name, why, esc.summary, send_to=target)
     sink.log_run(task.name, "Escalated", esc.summary, esc.model_used)
     if target == "Human":
         sink.blocked(task.page_id)
     clear_attempts(task.task_id)
-    digest.append(f"ESCALATED {task.task_id} after {failures} local fails → {target}")
+    digest.append(
+        f"ESCALATED {task.task_id} after {failures} local fails → {target} "
+        f"[score={fail_decision.score}/{fail_decision.tier}]"
+    )
     return esc
 
 
@@ -787,6 +840,16 @@ def mock_tasks() -> list[Task]:
             model_route="Local Hermes",
             repo="mock-app",
             priority="P1",
+        ),
+        Task(
+            page_id="mock-mid-1",
+            task_id="BLD-103",
+            name="API handler cleanup",
+            acceptance="Refactor one HTTP handler; no auth or infra changes.",
+            complexity="Cloud-only",
+            model_route="Local Hermes",
+            repo="mock-app",
+            priority="P2",
         ),
         Task(
             page_id="mock-cloud-1",
@@ -847,10 +910,24 @@ def main() -> None:
     digest: list[str] = [f"Autocode digest {datetime.now(timezone.utc).isoformat()}"]
     for task in tasks[:max_tasks]:
         prior = 0 if args.mock else load_attempts(task.task_id)
-        route = route_task(task, hw, prior)
-        print(f"Task {task.task_id} {task.name!r} → route={route} (prior_failures={prior})")
+        decision = decide_route(
+            task,
+            local_failures=prior,
+            hardware_constrained=hw.too_constrained_for_local()
+            or _maybe_local_ram_issue(task, hw),
+            max_local_attempts=env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2),
+        )
+        route = decision.target
+        print(
+            f"Task {task.task_id} {task.name!r} → route={route} "
+            f"[score={decision.score} tier={decision.tier}] "
+            f"({decision.reason}; prior_failures={prior})"
+        )
         if args.dry_run and not args.mock:
-            digest.append(f"DRY-RUN {task.task_id} → {route}")
+            digest.append(
+                f"DRY-RUN {task.task_id} → {route} "
+                f"[score={decision.score}/{decision.tier}]"
+            )
             continue
         process_task(task, hw, digest, sink, mock=args.mock)
 
