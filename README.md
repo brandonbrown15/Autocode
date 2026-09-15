@@ -89,6 +89,7 @@ Details: [docs/guardrails.md](docs/guardrails.md) · [docs/security.md](docs/sec
 - [Notion setup](docs/notion-setup.md) — recreate databases in *your* workspace
 - [Routing / escalation](docs/routing.md) — local vs cloud decision tree
 - [Go live checklist](docs/go-live.md) — what’s left for overnight ops
+- [Remote ops](docs/remote-ops.md) — Tailscale + Telegram watch / pause / abort
 - [Architecture](docs/architecture.md)
 - [Jetson notes](docs/jetson.md)
 - [Contributing](CONTRIBUTING.md)
