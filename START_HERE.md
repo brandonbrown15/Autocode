@@ -15,18 +15,25 @@ Answer a few questions. Wait. Done.
 ## What you need before `./start`
 
 1. **GitHub account**  
-   Easy path: make a token at https://github.com/settings/tokens?type=beta  
+   Easy path: token at https://github.com/settings/tokens?type=beta  
    (Contents + Pull requests = Read and write)
 
-2. **Notion account** (free is fine)  
-   - Make an integration: https://www.notion.so/my-integrations  
-   - Make a blank page named **Autocode Hub**  
-   - On that page: **••• → Connections → Autocode**  
-   - Copy the page link
+2. **Notion account** (free is fine) — pick one:
 
-3. **This computer turned on** (Jetson or Linux)
+   **A) Browser sign-in (like a plugin)** — best after one-time setup  
+   - Create a **Public** integration: https://www.notion.so/my-integrations  
+   - Redirect URI: `http://127.0.0.1:8765/callback`  
+   - Put `NOTION_OAUTH_CLIENT_ID` + `NOTION_OAUTH_CLIENT_SECRET` in `.env`  
+   - Then `./start` → choose browser sign-in (or run `./scripts/connect_notion.sh`)
 
-Optional: a big SSD (like 4TB). `./start` will try to use it automatically.
+   **B) Paste a secret** (also fine)  
+   - Internal integration → copy Secret when `./start` asks
+
+   Either way, also: blank page **Autocode Hub** → **••• → Connections → Autocode** → paste page link
+
+3. **This computer on** (Jetson or Linux)
+
+Optional: big SSD (4TB). `./start` will try to use it automatically.
 
 ---
 

@@ -26,11 +26,18 @@ Full kid-simple checklist: **[START_HERE.md](START_HERE.md)**
 
 Add work in Notion → **Build Queue** → Status = **Ready**.
 
+## How the AIs talk
+
+Hermes only talks to **local Ollama**.  
+The night orchestrator decides when to call Cursor / Grok / a human.  
+→ [docs/how-ai-talks.md](docs/how-ai-talks.md)
+
 ## Optional later
 
-- Cursor / Grok webhooks for harder tasks → [docs/go-live.md](docs/go-live.md)
+- Notion browser sign-in: `./scripts/connect_notion.sh`
+- Cursor / Grok webhooks → [docs/go-live.md](docs/go-live.md)
 - Phone remote control → [docs/remote-ops.md](docs/remote-ops.md)
-- Jetson + 4TB SSD notes → [docs/jetson.md](docs/jetson.md)
+- Jetson + 4TB SSD → [docs/jetson.md](docs/jetson.md)
 
 ## License
 

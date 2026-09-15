@@ -79,10 +79,13 @@ check_layout() {
     scripts/bootstrap_jetson.sh
     scripts/go_live.sh
     scripts/auth_github.sh
+    scripts/connect_notion.sh
+    scripts/connect_notion.py
     scripts/doctor.sh
     scripts/smoke_hermes.sh
     scripts/delegate_cursor.sh
     scripts/delegate_grok.sh
+    docs/how-ai-talks.md
   )
   local missing=0
   for f in "${required[@]}"; do

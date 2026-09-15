@@ -112,24 +112,47 @@ fi
 
 # ========== 2) Notion ==========
 big "Step 2 of 4 — Notion (the to-do list)"
-say "Do these three tiny things:"
+say "Best: sign in with your browser (like a plugin)."
+say "Backup: paste a Notion secret."
 say ""
-say "  A) Open:  https://www.notion.so/my-integrations"
-say "     Click New integration → name it Autocode → copy the Secret"
-say ""
-ask "Paste Notion secret (starts with secret_ or ntn_)" NOTION_IN "${NOTION_TOKEN:-}"
-while [[ -z "${NOTION_IN}" ]]; do
-  say "Need this one — Autocode reads your to-do list from Notion."
-  ask "Paste Notion secret" NOTION_IN ""
-done
-upsert_env NOTION_TOKEN "$NOTION_IN"
-export NOTION_TOKEN="$NOTION_IN"
-ok "Saved Notion secret"
+
+NOTION_CONNECTED=0
+if [[ -n "${NOTION_TOKEN:-}" ]]; then
+  ok "Notion already connected"
+  NOTION_CONNECTED=1
+else
+  ask "Connect Notion how?  [1] browser sign-in  [2] paste secret" NOTION_MODE "1"
+  if [[ "${NOTION_MODE}" == "1" ]]; then
+    say "Opening Notion sign-in…"
+    if bash "${ROOT}/scripts/connect_notion.sh"; then
+      # shellcheck disable=SC1091
+      set -a; source .env; set +a
+      NOTION_CONNECTED=1
+      ok "Notion signed in"
+    else
+      say "Browser sign-in needs a one-time Public Notion app (see START_HERE.md)."
+      say "Falling back to paste-a-secret…"
+    fi
+  fi
+fi
+
+if [[ "${NOTION_CONNECTED}" -eq 0 ]]; then
+  say "Open: https://www.notion.so/my-integrations"
+  say "New integration → copy the Secret"
+  ask "Paste Notion secret (starts with secret_ or ntn_)" NOTION_IN "${NOTION_TOKEN:-}"
+  while [[ -z "${NOTION_IN}" ]]; do
+    say "Need this — Autocode reads your to-do list from Notion."
+    ask "Paste Notion secret" NOTION_IN ""
+  done
+  upsert_env NOTION_TOKEN "$NOTION_IN"
+  export NOTION_TOKEN="$NOTION_IN"
+  ok "Saved Notion secret"
+fi
 
 say ""
-say "  B) In Notion: make a blank page called Autocode Hub"
-say "  C) On that page: ••• → Connections → add Autocode"
-say "  D) Copy the page link from the browser address bar"
+say "Make a blank Notion page named Autocode Hub."
+say "On that page: ••• → Connections → allow Autocode."
+say "Then paste the page link from the browser."
 say ""
 ask "Paste Autocode Hub page link (or page id)" HUB_IN "${NOTION_HUB_PAGE:-}"
 while [[ -z "${HUB_IN}" ]]; do
