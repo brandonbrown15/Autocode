@@ -1,0 +1,16 @@
+{
+  "name": "Autocode",
+  "install": "bash scripts/setup.sh --yes",
+  "terminals": [
+    {
+      "name": "autocode-ui",
+      "command": "python3 -m ui.server"
+    }
+  ],
+  "ports": [
+    {
+      "name": "Autocode dashboard",
+      "port": 8787
+    }
+  ]
+}
