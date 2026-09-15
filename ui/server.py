@@ -138,9 +138,9 @@ def readiness() -> dict[str, Any]:
         },
         {
             "id": "continuous",
-            "label": "Continuous daytime coding",
+            "label": "Always-on project autopilot",
             "ok": env_truthy("AUTOCODE_CONTINUOUS_ENABLED"),
-            "hint": "Set AUTOCODE_CONTINUOUS_ENABLED=1 for ~30min work cycles",
+            "hint": "Set AUTOCODE_CONTINUOUS_ENABLED=1 to keep draining Ready tasks until finished",
             "optional": True,
         },
     ]
@@ -176,7 +176,7 @@ def latest_log_tail(n: int = 80) -> dict[str, Any]:
     if _demo_log.exists():
         candidates.append(_demo_log)
     if not candidates:
-        return {"path": None, "lines": [], "text": "(no logs yet — run a mock night)"}
+        return {"path": None, "lines": [], "text": "(no logs yet — run a mock cycle)"}
     path = max(candidates, key=lambda p: p.stat().st_mtime)
     try:
         text = path.read_text(errors="replace")
@@ -216,10 +216,10 @@ def start_demo() -> dict[str, Any]:
         )
         ops.write_status(
             phase="starting",
-            detail="UI started mock demo night",
+            detail="UI started mock demo cycle",
             night_id=f"ui-demo-{int(time.time())}",
         )
-        ops.telegram_notify("Autocode UI: mock demo night started")
+        ops.telegram_notify("Autocode UI: mock demo cycle started")
     return {"ok": True, **demo_state()}
 
 
@@ -284,6 +284,222 @@ def apply_control(action: str, note: str = "", task_id: str = "") -> dict[str, A
     else:
         return {"ok": False, "error": f"unknown action: {action}"}
     return {"ok": True, **snapshot()}
+
+
+
+def _ollama_chat(message: str, system: str) -> str:
+    """Call local Ollama chat API. Raises on transport/HTTP errors."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    host = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
+    model = os.environ.get("OLLAMA_MODEL", "coder-64k")
+    body = _json.dumps(
+        {
+            "model": model,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": message},
+            ],
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"http://{host}/api/chat",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = _json.loads(resp.read().decode())
+    return (data.get("message") or {}).get("content") or data.get("response") or ""
+
+
+def _should_escalate(message: str, local_reply: str) -> bool:
+    text = f"{message}\n{local_reply}".lower()
+    triggers = (
+        "escalate:",
+        "cannot",
+        "can't",
+        "too complex",
+        "need a larger",
+        "need cloud",
+        "i am not able",
+        "as a local model",
+    )
+    if any(t in text for t in triggers):
+        return True
+    # Long architectural asks → escalate
+    keywords = ("architecture", "redesign", "migrate", "multi-service", "security audit")
+    if len(message) > 400 or sum(1 for k in keywords if k in message.lower()) >= 2:
+        return True
+    if len(local_reply.strip()) < 40:
+        return True
+    return False
+
+
+def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
+    """Escalate to Claude / OpenRouter / xAI. Returns (reply, provider)."""
+    import json as _json
+    import urllib.request
+
+    prompt = (
+        "You are Autocode's cloud escalator. The local Jetson model could not fully "
+        "handle this operator instruction. Provide a concrete plan or answer, and if "
+        "work should be queued, end with IMPROVE: <checklist item>.\n\n"
+        f"Operator: {message}\n\nLocal model said:\n{local_reply[:2000]}"
+    )
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        body = {
+            "model": os.environ.get("AUTOCODE_CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+            "max_tokens": 1200,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=_json.dumps(body).encode(),
+            method="POST",
+            headers={
+                "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = _json.loads(resp.read().decode())
+        parts = data.get("content") or []
+        text = " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
+        return text or "(empty Claude reply)", "Claude"
+    if os.environ.get("OPENROUTER_API_KEY"):
+        body = {
+            "model": os.environ.get("AUTOCODE_OPENROUTER_MODEL", "x-ai/grok-2"),
+            "messages": [
+                {"role": "system", "content": "You are Autocode cloud escalator."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=_json.dumps(body).encode(),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = _json.loads(resp.read().decode())
+        return data["choices"][0]["message"]["content"], "OpenRouter"
+    if os.environ.get("XAI_API_KEY"):
+        body = {
+            "model": os.environ.get("AUTOCODE_GROK_MODEL", "grok-2-latest"),
+            "messages": [
+                {"role": "system", "content": "You are Autocode cloud escalator."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        req = urllib.request.Request(
+            "https://api.x.ai/v1/chat/completions",
+            data=_json.dumps(body).encode(),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {os.environ['XAI_API_KEY']}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = _json.loads(resp.read().decode())
+        return data["choices"][0]["message"]["content"], "Grok"
+    return (
+        "No cloud provider configured (set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY). "
+        "Local reply retained.",
+        "none",
+    )
+
+
+def handle_chat(message: str, seed_notion: bool = True) -> dict[str, Any]:
+    message = (message or "").strip()
+    if not message:
+        return {"ok": False, "error": "message required"}
+    system = (
+        "You are Autocode's local co-pilot on a Jetson. Help the operator steer the "
+        "Notion-driven coding autopilot. Be concise. If the request is too large for a "
+        "local model, start with ESCALATE: and say why. If a durable follow-up should be "
+        "queued for Autocode, end with IMPROVE: <checklist item> or BUG: <bug>."
+    )
+    local_reply = ""
+    try:
+        local_reply = _ollama_chat(message, system)
+    except Exception as e:  # noqa: BLE001
+        local_reply = f"(local model unavailable: {e})"
+        escalated = True
+    else:
+        escalated = _should_escalate(message, local_reply)
+
+    cloud_reply = ""
+    provider = ""
+    if escalated:
+        try:
+            cloud_reply, provider = _cloud_chat(message, local_reply)
+        except Exception as e:  # noqa: BLE001
+            cloud_reply = f"(cloud escalate failed: {e})"
+            provider = "error"
+
+    seeded_task = None
+    if seed_notion:
+        blob = f"{message}\n{local_reply}\n{cloud_reply}"
+        try:
+            from orchestrator.self_feed import feed_from_agent_output, seed_checklist_item
+
+            pages = feed_from_agent_output(blob, mock=False)
+            if pages:
+                seeded_task = pages[0]
+            elif any(k in message.lower() for k in ("add to checklist", "queue", "ready task", "todo")):
+                seeded_task = seed_checklist_item(
+                    title=f"Operator: {message[:80]}",
+                    acceptance=(
+                        "Queued from Autocode UI chat.\n\n"
+                        f"Operator request:\n{message}\n\n"
+                        f"Local reply:\n{local_reply[:1000]}\n\n"
+                        f"Cloud reply:\n{(cloud_reply or '')[:1000]}"
+                    ),
+                    kind="improve",
+                    priority="P2",
+                    mock=False,
+                )
+        except Exception as e:  # noqa: BLE001
+            print(f"[ui-chat] seed failed: {e}")
+
+    # Persist a short transcript for remote ops
+    STATE.mkdir(parents=True, exist_ok=True)
+    log = STATE / "ui-chat.jsonl"
+    import json as _json
+    import time as _time
+
+    log.open("a").write(
+        _json.dumps(
+            {
+                "ts": _time.time(),
+                "message": message,
+                "local_reply": local_reply,
+                "escalated": escalated,
+                "cloud_reply": cloud_reply,
+                "provider": provider,
+                "seeded_task": seeded_task,
+            }
+        )
+        + "\n"
+    )
+    return {
+        "ok": True,
+        "local_reply": local_reply,
+        "escalated": escalated,
+        "cloud_reply": cloud_reply,
+        "provider": provider,
+        "seeded_task": seeded_task,
+    }
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -361,6 +577,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/work":
             force = str(data.get("force", "1")).lower() not in ("0", "false", "no")
             return self._send(*json_response(start_work_cycle(force=force)))
+
+        if path == "/api/chat":
+            return self._send(
+                *json_response(
+                    handle_chat(
+                        str(data.get("message") or ""),
+                        seed_notion=str(data.get("seed_notion", "1")).lower()
+                        not in ("0", "false", "no"),
+                    )
+                )
+            )
         self._send(*json_response({"ok": False, "error": "not found"}, 404))
 
     def _static(self, name: str, content_type: str) -> None:

@@ -370,3 +370,57 @@ h2 { font-size: 1.2rem; }
   .checks li { grid-template-columns: auto 1fr; }
   .hint { grid-column: 2; text-align: left; }
 }
+
+
+/* Direct model chat */
+.chat {
+  margin: 2.5rem auto 0;
+  max-width: 920px;
+  padding: 0 1.25rem 2rem;
+}
+.chat-log {
+  min-height: 8rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 1rem 1.1rem;
+  background: linear-gradient(180deg, rgba(15, 36, 72, 0.04), rgba(15, 36, 72, 0.02));
+  border-top: 2px solid #0f2448;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.chat-form textarea {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(15, 36, 72, 0.25);
+  background: #f7f9fc;
+  color: #0f2448;
+  font: inherit;
+  resize: vertical;
+}
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  margin-top: 0.65rem;
+}
+.check-inline {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.92rem;
+  color: #243858;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}

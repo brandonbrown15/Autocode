@@ -46,7 +46,7 @@
     if (snap.stuck) return "Heartbeat is stale while a task is running — it may be stuck.";
     switch (st.phase) {
       case "idle":
-        return "Idle. Add Ready tasks in Notion, run a work cycle, or try a mock night.";
+        return "Idle. Autocode will keep draining Ready Notion tasks until the project is finished. Add work, run a cycle, or try a mock.";
       case "starting":
         return "Work cycle is starting…";
       case "routing":
@@ -126,7 +126,7 @@
     const demoBtn = document.getElementById("demoBtn");
     const workBtn = document.getElementById("workBtn");
     demoBtn.disabled = !!demo.running || !!work.running;
-    demoBtn.textContent = demo.running ? "Mock night running…" : "Run mock night";
+    demoBtn.textContent = demo.running ? "Mock cycle running…" : "Run mock cycle";
     if (workBtn) {
       workBtn.disabled = !!work.running || !!demo.running;
       workBtn.textContent = work.running ? "Work cycle running…" : "Run work cycle";
@@ -167,7 +167,7 @@
     btn.disabled = true;
     try {
       await post("/api/demo", {});
-      toast("Mock night started");
+      toast("Mock cycle started");
       await refresh();
     } catch (e) {
       toast(String(e.message || e));
@@ -187,6 +187,46 @@
       } catch (e) {
         toast(String(e.message || e));
         btn.disabled = false;
+      }
+    });
+  }
+
+  function appendChat(role, text) {
+    const log = document.getElementById("chatLog");
+    if (!log) return;
+    const line = document.createElement("div");
+    line.className = `chat-line ${role}`;
+    line.textContent = `${role === "you" ? "You" : role === "local" ? "Local" : role === "cloud" ? "Cloud" : "System"}: ${text}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const chatForm = document.getElementById("chatForm");
+  if (chatForm) {
+    chatForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const input = document.getElementById("chatInput");
+      const seed = document.getElementById("chatSeed");
+      const msg = (input.value || "").trim();
+      if (!msg) return;
+      const sendBtn = document.getElementById("chatSend");
+      sendBtn.disabled = true;
+      appendChat("you", msg);
+      input.value = "";
+      try {
+        const data = await post("/api/chat", {
+          message: msg,
+          seed_notion: !!(seed && seed.checked),
+        });
+        if (data.local_reply) appendChat("local", data.local_reply);
+        if (data.escalated && data.cloud_reply) appendChat("cloud", data.cloud_reply);
+        if (data.seeded_task) appendChat("system", `Added to Notion checklist: ${data.seeded_task}`);
+        toast(data.escalated ? "Escalated to larger model" : "Local model replied");
+      } catch (e) {
+        appendChat("system", String(e.message || e));
+        toast(String(e.message || e));
+      } finally {
+        sendBtn.disabled = false;
       }
     });
   }

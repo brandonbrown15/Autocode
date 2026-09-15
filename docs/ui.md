@@ -78,3 +78,11 @@ Do **not** bind `0.0.0.0` on a public IP without a tunnel + access policy.
 | `AUTOCODE_UI_REMOTE` | `0` | `1` = prefer Tailscale IP / LAN bind |
 
 Mutating actions require a session token injected into the page (CSRF guard).
+
+
+## Talk to Autocode
+
+The dashboard includes a chat box that talks to the **local** Ollama model first.
+If the request is too hard (or the local model says `ESCALATE:`), Autocode forwards it
+to Claude / OpenRouter / Grok when those keys are set. Useful instructions can be
+seeded straight into the Notion Ready checklist.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Continuous work cycle — picks Ready Notion tasks anytime, not just overnight.
+# Always-on project autopilot — drains Ready Notion tasks until the project is finished.
 # Uses the same orchestrator as overnight_run.sh, with a flock so runs never overlap.
 #
 # Live timer runs need:
@@ -67,6 +67,21 @@ for arg in "${PASS_ARGS[@]}"; do
 done
 if [[ "$HAS_LIMIT" -eq 0 ]]; then
   PASS_ARGS+=(--limit "$LIMIT")
+fi
+
+# Drain Ready queue each tick (project autopilot until finished).
+DRAIN="${AUTOCODE_DRAIN_UNTIL_EMPTY:-1}"
+HAS_DRAIN=0
+for arg in "${PASS_ARGS[@]}"; do
+  if [[ "$arg" == "--drain" || "$arg" == "--no-drain" ]]; then HAS_DRAIN=1; break; fi
+done
+if [[ "$HAS_DRAIN" -eq 0 && "$DRAIN" == "1" ]]; then
+  PASS_ARGS+=(--drain)
+fi
+
+# Routine health / bug checklist seed before coding.
+if [[ " ${PASS_ARGS[*]} " != *" --mock "* && "${AUTOCODE_HEALTH_FEED_ENABLED:-1}" == "1" ]]; then
+  python3 -m orchestrator.self_feed --health || true
 fi
 
 echo "limit=${LIMIT} wall=${AUTOCODE_MAX_WALL_MINUTES:-90}m continuous=${AUTOCODE_CONTINUOUS_ENABLED:-0}"

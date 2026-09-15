@@ -2,7 +2,7 @@
 
 Always-on coding autopilot for a Jetson (or any Linux + GPU box).
 
-It reads tasks from **your** Notion list, codes with a **local** AI all day (and overnight), opens GitHub PRs, and can text you when it needs help.
+It reads tasks from **your** Notion project, keeps coding without waiting for you, opens GitHub PRs, runs routine health/bug checks, and can enqueue follow-up checklist items when it spots improvements — until the project is finished.
 
 ## Setup (this easy)
 
@@ -33,7 +33,7 @@ Always-on coding: **[docs/continuous.md](docs/continuous.md)** · Dashboard: **[
 ## How the AIs talk
 
 Hermes only talks to **local Ollama**.  
-The night orchestrator decides when to call Cursor / Grok / a human.  
+The always-on orchestrator decides when to call Cursor / Grok / a human.  
 → [docs/how-ai-talks.md](docs/how-ai-talks.md)
 
 ## Optional later
@@ -45,4 +45,4 @@ The night orchestrator decides when to call Cursor / Grok / a human.
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE) — free to use; please keep BrownHawke / Autocode credit

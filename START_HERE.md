@@ -43,7 +43,7 @@ Optional: big SSD (4TB). `./start` will try to use it automatically.
 |---------|---------|
 | Open the dashboard | `./scripts/ui.sh` → http://127.0.0.1:8787/ |
 | Remote phone view | `./scripts/ui.sh --remote` (Tailscale) |
-| Always-on coding | set `AUTOCODE_CONTINUOUS_ENABLED=1` + `./cron/install_autopilot_timers.sh` |
+| Project autopilot until finished | set `AUTOCODE_CONTINUOUS_ENABLED=1` + `AUTOCODE_DRAIN_UNTIL_EMPTY=1` + `./cron/install_autopilot_timers.sh` |
 | See if it is healthy | `./scripts/doctor.sh` |
 | See what it is doing | `./scripts/status.sh` |
 | Pause it | `./scripts/control.sh pause` |

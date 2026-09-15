@@ -23,7 +23,7 @@
       />
       <div class="brand-copy">
         <p class="product">Autocode</p>
-        <p class="tagline">Always-on coding on your machine — watch it, pause it, keep it honest.</p>
+        <p class="tagline">Notion-driven coding autopilot — keeps building until the project is finished.</p>
       </div>
     </div>
     <div class="live-chip" id="liveChip" data-phase="idle">
@@ -47,7 +47,7 @@
         <button type="button" class="btn" data-action="resume">Resume</button>
         <button type="button" class="btn danger" data-action="abort">Abort</button>
         <button type="button" class="btn ghost" id="workBtn">Run work cycle</button>
-        <button type="button" class="btn ghost" id="demoBtn">Run mock night</button>
+        <button type="button" class="btn ghost" id="demoBtn">Run mock cycle</button>
       </div>
       <form class="skip-row" id="skipForm">
         <label for="skipId">Skip task id</label>
@@ -58,9 +58,24 @@
 
     <section class="ready" aria-labelledby="readyHeading">
       <h2 id="readyHeading">Ready checklist</h2>
-      <p class="section-note">Navy marks mean this Jetson (or Linux box) can run a night. Fix reds with the hints.</p>
+      <p class="section-note">Navy marks mean this Jetson (or Linux box) is ready to autopilot. Fix reds with the hints.</p>
       <ul class="checks" id="checks"></ul>
       <p class="meta" id="readyMeta"></p>
+    </section>
+
+
+    <section class="chat" aria-labelledby="chatHeading">
+      <h2 id="chatHeading">Talk to Autocode</h2>
+      <p class="section-note">Send instructions to the local model. If it cannot handle them, Autocode escalates to a larger cloud model automatically.</p>
+      <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
+      <form class="chat-form" id="chatForm">
+        <label for="chatInput" class="sr-only">Message</label>
+        <textarea id="chatInput" rows="3" placeholder="e.g. Add a Ready task to harden the login rate limiter, then keep going." required></textarea>
+        <div class="chat-actions">
+          <button type="submit" class="btn primary" id="chatSend">Send</button>
+          <label class="check-inline"><input type="checkbox" id="chatSeed" checked /> Also add to Notion checklist when useful</label>
+        </div>
+      </form>
     </section>
 
     <section class="logs" aria-labelledby="logHeading">

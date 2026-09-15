@@ -171,6 +171,16 @@ if [[ "${AUTOCODE_CONTINUOUS_ENABLED:-0}" == "1" ]]; then
 else
   warn_msg "AUTOCODE_CONTINUOUS_ENABLED!=1 — only overnight 01:00 batch (see docs/continuous.md)"
 fi
+if [[ "${AUTOCODE_DRAIN_UNTIL_EMPTY:-1}" == "1" ]]; then
+  pass "AUTOCODE_DRAIN_UNTIL_EMPTY=1 (drain Ready until empty)"
+else
+  warn_msg "AUTOCODE_DRAIN_UNTIL_EMPTY!=1 — worker does one small batch per tick"
+fi
+if [[ "${AUTOCODE_SELF_FEED_ENABLED:-1}" == "1" ]]; then
+  pass "AUTOCODE_SELF_FEED_ENABLED=1 (IMPROVE/BUG self-feed on)"
+else
+  warn_msg "AUTOCODE_SELF_FEED_ENABLED!=1 — no auto checklist follow-ups"
+fi
 
 # Remote ops
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
