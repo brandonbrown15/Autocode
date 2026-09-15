@@ -3,18 +3,28 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Autocode</title>
+  <title>Autocode · BrownHawke Engineering</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true"></div>
+
   <header class="top">
     <div class="brand-block">
-      <p class="brand">Autocode</p>
-      <p class="tagline">Overnight coding on your machine — watch it, pause it, keep it honest.</p>
+      <img
+        class="logo"
+        src="/brand/brownhawke-logo.jpg"
+        alt="BrownHawke Engineering"
+        width="220"
+        height="211"
+      />
+      <div class="brand-copy">
+        <p class="product">Autocode</p>
+        <p class="tagline">Overnight coding on your machine — watch it, pause it, keep it honest.</p>
+      </div>
     </div>
     <div class="live-chip" id="liveChip" data-phase="idle">
       <span class="pulse" aria-hidden="true"></span>
@@ -47,7 +57,7 @@
 
     <section class="ready" aria-labelledby="readyHeading">
       <h2 id="readyHeading">Ready checklist</h2>
-      <p class="section-note">Green means this Jetson (or Linux box) can run a night. Fix reds with the hints.</p>
+      <p class="section-note">Navy marks mean this Jetson (or Linux box) can run a night. Fix reds with the hints.</p>
       <ul class="checks" id="checks"></ul>
       <p class="meta" id="readyMeta"></p>
     </section>
@@ -62,7 +72,7 @@
   </main>
 
   <footer class="foot">
-    <p>Local UI · binds to this machine only by default · <a href="https://github.com/brandonbrown15/Autocode">Autocode</a></p>
+    <p>BrownHawke Engineering · Autocode local UI · <a href="https://github.com/brandonbrown15/Autocode">GitHub</a></p>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
   </footer>
 

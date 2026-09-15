@@ -275,6 +275,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._static("app.css", "text/css; charset=utf-8")
         if path == "/app.js":
             return self._static("app.js", "application/javascript; charset=utf-8")
+        if path.startswith("/brand/"):
+            name = path.lstrip("/")
+            ctype = "image/jpeg" if name.endswith((".jpg", ".jpeg")) else "image/png" if name.endswith(".png") else "application/octet-stream"
+            return self._static(name, ctype)
         if path == "/api/status":
             return self._send(*json_response(snapshot()))
         if path == "/api/ready":
