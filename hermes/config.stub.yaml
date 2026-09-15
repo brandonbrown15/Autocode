@@ -1,0 +1,27 @@
+# Stub Hermes config for Autocode local-primary setup.
+# Copy/merge into ~/.hermes/ after Hermes is installed (paths vary by Hermes version).
+# Prefer `hermes model` interactive setup; this file documents the intended end state.
+
+model:
+  # Local Ollama OpenAI-compatible endpoint (same machine)
+  provider: custom
+  base_url: http://127.0.0.1:11434/v1
+  # Leave API key empty / dummy for local Ollama
+  api_key: ""
+  model: coder-64k
+  # Request large context when Hermes supports ollama_num_ctx / native /api/chat
+  ollama_num_ctx: 65536
+
+# Paid models are exceptions — configure only after local path works (Phase 2b)
+fallback_providers: []
+
+# Messaging: enable Telegram after CLI tool-use smoke passes
+gateways:
+  telegram:
+    enabled: false
+    # bot_token / chat_id come from env / hermes gateway setup
+
+# Autopilot skill pointer (see notion + cron scripts)
+skills:
+  - name: overnight-coding-autopilot
+    path: ../docs/hermes-overnight-skill.md
