@@ -291,7 +291,7 @@ def ensure_branch(repo_dir: Path, branch: str) -> None:
 
 
 def build_prompt(task: Task, branch: str) -> str:
-    return f"""You are Autocode local Hermes working overnight.
+    return f"""You are Autocode local Hermes — an always-on coding autopilot.
 
 Task: {task.task_id} — {task.name}
 Priority: {task.priority}
@@ -310,6 +310,10 @@ Rules:
 - Prefer a small PR-ready change.
 - Run available tests/linters.
 - If stuck after honest attempts, stop and say ESCALATE: <reason>.
+- If you notice a clear follow-up improvement or bug outside this task, end with:
+  IMPROVE: <short actionable checklist item>
+  or BUG: <short actionable bug to fix>
+  Autocode will add those to the Notion Ready checklist automatically.
 """
 
 
@@ -805,10 +809,30 @@ def process_task(
             digest.append(
                 f"{last.outcome.upper()} {task.task_id}: {task.name} {last.pr_url or ''}".strip()
             )
+            try:
+                from orchestrator.self_feed import feed_from_agent_output
+
+                feed_from_agent_output(
+                    last.summary, repo=getattr(task, "repo", "") or "", mock=mock
+                )
+            except Exception as _sf:  # noqa: BLE001
+                print(f"[self-feed] post-success hook failed: {_sf}")
             return last
         failures += 1
         save_attempts(task.task_id, failures)
         print(f"Local attempt {failures}/{max_attempts} failed: {last.summary[:200]}")
+        if (last.why or "") == "Tests failing" or "checks failed" in (last.summary or "").lower():
+            try:
+                from orchestrator.self_feed import feed_from_check_failure
+
+                feed_from_check_failure(
+                    last.summary,
+                    repo=getattr(task, "repo", "") or "",
+                    task_name=task.name,
+                    mock=mock,
+                )
+            except Exception as _sf:  # noqa: BLE001
+                print(f"[self-feed] check-failure hook failed: {_sf}")
         if failures < max_attempts:
             time.sleep(2)
 
@@ -886,104 +910,181 @@ def send_digest(path: Path) -> None:
         subprocess.run([str(script), str(path)], check=False)
 
 
+
+def _env_truthy(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).lower() in ("1", "true", "yes", "on")
+
+
 def main() -> None:
     notion.load_dotenv()
-    parser = argparse.ArgumentParser(description="Autocode overnight orchestrator")
+    parser = argparse.ArgumentParser(
+        description="Autocode project autopilot — drain Notion Ready work until done"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Route only; no claim/execute")
-    parser.add_argument("--mock", action="store_true", help="Simulate full night without Notion/Hermes")
-    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--mock", action="store_true", help="Simulate a full cycle without Notion/Hermes")
+    parser.add_argument("--limit", type=int, default=None, help="Tasks per batch")
+    parser.add_argument(
+        "--drain",
+        action="store_true",
+        help="Keep pulling Ready tasks until the queue is empty (or safety cap)",
+    )
     parser.add_argument("--force-low-ram", action="store_true", help="Simulate constrained hardware")
+    parser.add_argument(
+        "--skip-health-feed",
+        action="store_true",
+        help="Do not seed routine health/bug checklist items this cycle",
+    )
     args = parser.parse_args()
 
-    max_tasks = args.limit or env_int("AUTOCODE_MAX_TASKS_PER_NIGHT", 2)
+    drain = args.drain or _env_truthy("AUTOCODE_DRAIN_UNTIL_EMPTY", "0")
+    batch = args.limit or env_int(
+        "AUTOCODE_MAX_TASKS_PER_CYCLE" if drain else "AUTOCODE_MAX_TASKS_PER_NIGHT",
+        1 if drain else 2,
+    )
+    hard_cap = env_int("AUTOCODE_MAX_TASKS_PER_DRAIN", 50)
     hw = probe_hardware()
     if args.force_low_ram:
-        hw = HardwareSnapshot(512, hw.mem_total_mb, hw.disk_free_gb, hw.load1, hw.is_jetson, hw.notes + ["forced low RAM"])
+        hw = HardwareSnapshot(
+            512,
+            hw.mem_total_mb,
+            hw.disk_free_gb,
+            hw.load1,
+            hw.is_jetson,
+            hw.notes + ["forced low RAM"],
+        )
     print(f"Hardware: {asdict(hw)}")
+    print(f"Mode: {'drain-until-empty' if drain else 'single-batch'} batch={batch} cap={hard_cap}")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     digest_path = ROOT / "state" / f"digest-{stamp}.txt"
     digest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    night_id = stamp
+    run_id = stamp
     ops.set_control(clear=True)
-    ops.write_status(phase="starting", night_id=night_id, detail="night starting", clear_task=True)
-    ops.telegram_notify(f"Autocode night {night_id} starting (mock={args.mock})")
+    ops.write_status(
+        phase="starting",
+        night_id=run_id,
+        detail="autopilot cycle starting",
+        clear_task=True,
+    )
+    ops.telegram_notify(f"Autocode cycle {run_id} starting (mock={args.mock}, drain={drain})")
 
     if args.mock:
-        os.environ.setdefault("AUTOCODE_CURSOR_DELEGATE_CMD", str(ROOT / "scripts" / "delegate_cursor_stub.sh"))
+        os.environ.setdefault(
+            "AUTOCODE_CURSOR_DELEGATE_CMD",
+            str(ROOT / "scripts" / "delegate_cursor_stub.sh"),
+        )
         sink: NotionSink = MockNotionSink(ROOT / "state" / "mock_notion.jsonl")
-        tasks = mock_tasks()
-        # Put workspace under state for mock
-        os.environ["WORKSPACE_ROOT"] = str(ROOT / "state" / "mock_workspaces")
+        # Keep mock git work outside this Autocode checkout
+        mock_ws = Path("/tmp/autocode-mock-workspaces")
+        mock_ws.mkdir(parents=True, exist_ok=True)
+        os.environ["WORKSPACE_ROOT"] = str(mock_ws)
     else:
         if not os.environ.get("NOTION_TOKEN"):
             raise SystemExit("NOTION_TOKEN required (or pass --mock)")
         sink = NotionSink()
-        tasks = query_ready_tasks(limit=max_tasks)
 
-    if not tasks:
-        print("No Ready tasks.")
-        digest_path.write_text("No Ready tasks.\n")
-        ops.write_status(phase="done", detail="no ready tasks", clear_task=True)
-        ops.telegram_notify(f"Autocode night {night_id}: no Ready tasks")
-        send_digest(digest_path)
-        return
+    if not args.skip_health_feed and not args.dry_run:
+        try:
+            from orchestrator.self_feed import maybe_seed_routine_health
 
-    digest: list[str] = [f"Autocode digest {datetime.now(timezone.utc).isoformat()}"]
-    for task in tasks[:max_tasks]:
-        flags = ops.wait_if_paused()
-        if flags.abort:
-            digest.append(f"ABORTED before {task.task_id}")
-            ops.write_status(phase="aborted", detail=f"abort before {task.task_id}")
-            ops.telegram_notify(f"Autocode ABORTED before {task.task_id}")
+            maybe_seed_routine_health(mock=args.mock, force=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[self-feed] routine health seed skipped: {e}")
+
+    digest: list[str] = [
+        f"Autocode digest {datetime.now(timezone.utc).isoformat()} drain={drain}"
+    ]
+    processed = 0
+    aborted = False
+
+    while True:
+        if args.mock:
+            tasks = mock_tasks() if processed == 0 else []
+        else:
+            tasks = query_ready_tasks(limit=batch)
+
+        if not tasks:
+            if processed == 0:
+                print("No Ready tasks.")
+                digest.append("No Ready tasks.")
+                ops.write_status(phase="done", detail="no ready tasks", clear_task=True)
+                ops.telegram_notify(f"Autocode cycle {run_id}: no Ready tasks")
+            else:
+                print("Ready queue drained.")
+                digest.append(f"Drained Ready queue after {processed} task(s).")
             break
-        if ops.should_skip(task.task_id):
-            ops.clear_skip(task.task_id)
-            digest.append(f"SKIPPED {task.task_id}: {task.name}")
-            ops.telegram_notify(f"Autocode SKIPPED {task.task_id}")
-            continue
 
-        prior = 0 if args.mock else load_attempts(task.task_id)
-        decision = decide_route(
-            task,
-            local_failures=prior,
-            hardware_constrained=hw.too_constrained_for_local()
-            or _maybe_local_ram_issue(task, hw),
-            max_local_attempts=env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2),
-        )
-        route = decision.target
-        ops.write_status(
-            phase="routing",
-            task_id=task.task_id,
-            task_name=task.name,
-            route=route,
-            detail=decision.reason,
-            night_id=night_id,
-        )
-        print(
-            f"Task {task.task_id} {task.name!r} → route={route} "
-            f"[score={decision.score} tier={decision.tier}] "
-            f"({decision.reason}; prior_failures={prior})"
-        )
-        if args.dry_run and not args.mock:
-            digest.append(
-                f"DRY-RUN {task.task_id} → {route} "
-                f"[score={decision.score}/{decision.tier}]"
+        for task in tasks[:batch]:
+            if processed >= hard_cap:
+                digest.append(f"Hit safety cap AUTOCODE_MAX_TASKS_PER_DRAIN={hard_cap}")
+                ops.telegram_notify(
+                    f"Autocode cycle {run_id}: hit drain safety cap ({hard_cap})"
+                )
+                break
+
+            flags = ops.wait_if_paused()
+            if flags.abort:
+                digest.append(f"ABORTED before {task.task_id}")
+                ops.write_status(phase="aborted", detail=f"abort before {task.task_id}")
+                ops.telegram_notify(f"Autocode ABORTED before {task.task_id}")
+                aborted = True
+                break
+            if ops.should_skip(task.task_id):
+                ops.clear_skip(task.task_id)
+                digest.append(f"SKIPPED {task.task_id}: {task.name}")
+                ops.telegram_notify(f"Autocode SKIPPED {task.task_id}")
+                continue
+
+            prior = 0 if args.mock else load_attempts(task.task_id)
+            decision = decide_route(
+                task,
+                local_failures=prior,
+                hardware_constrained=hw.too_constrained_for_local()
+                or _maybe_local_ram_issue(task, hw),
+                max_local_attempts=env_int("AUTOCODE_MAX_LOCAL_ATTEMPTS", 2),
             )
-            continue
-        ops.telegram_notify(
-            f"Autocode {task.task_id} → {route} [{decision.tier}] {task.name}"
-        )
-        process_task(task, hw, digest, sink, mock=args.mock)
+            route = decision.target
+            ops.write_status(
+                phase="routing",
+                task_id=task.task_id,
+                task_name=task.name,
+                route=route,
+                detail=decision.reason,
+                night_id=run_id,
+            )
+            print(
+                f"Task {task.task_id} {task.name!r} → route={route} "
+                f"[score={decision.score} tier={decision.tier}] "
+                f"({decision.reason}; prior_failures={prior})"
+            )
+            if args.dry_run and not args.mock:
+                digest.append(
+                    f"DRY-RUN {task.task_id} → {route} "
+                    f"[score={decision.score}/{decision.tier}]"
+                )
+                processed += 1
+                continue
+            ops.telegram_notify(
+                f"Autocode {task.task_id} → {route} [{decision.tier}] {task.name}"
+            )
+            process_task(task, hw, digest, sink, mock=args.mock)
+            processed += 1
+
+        if aborted or processed >= hard_cap or not drain or args.mock:
+            break
 
     final = ops.load_control()
-    phase = "aborted" if final.abort else "done"
-    ops.write_status(phase=phase, detail="night finished", clear_task=True)
+    phase = "aborted" if (aborted or final.abort) else "done"
+    ops.write_status(
+        phase=phase,
+        detail=f"cycle finished processed={processed}",
+        clear_task=True,
+    )
     digest_path.write_text("\n".join(digest) + "\n")
     print(f"Digest: {digest_path}")
     print("\n".join(digest))
-    ops.telegram_notify(f"Autocode night {night_id} {phase}\n" + "\n".join(digest[-8:]))
+    ops.telegram_notify(f"Autocode cycle {run_id} {phase}\n" + "\n".join(digest[-8:]))
     send_digest(digest_path)
 
 
