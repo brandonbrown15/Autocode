@@ -19,24 +19,20 @@ Runs [Hermes Agent](https://hermes-agent.ai) against a **local** Ollama coder, p
 git clone https://github.com/brandonbrown15/Autocode.git
 cd Autocode
 ./scripts/setup.sh          # creates local .env (gitignored)
-# edit .env — see docs/notion-setup.md
-./scripts/setup.sh --check  # verify layout + no secrets tracked
+# edit .env — NOTION_TOKEN + NOTION_HUB_PAGE + GITHUB_TOKEN (+ repos)
+./scripts/setup.sh --check
 ```
 
-### On the Jetson (preferred)
+### On the Jetson (fully auto)
 
 ```bash
-./scripts/bootstrap_jetson.sh   # swap, MAXN, Ollama, Hermes, gh, Tailscale, doctor
-# edit .env — Notion + CURSOR_WEBHOOK_URL + GROK_BOT_WEBHOOK_URL
-gh auth login
-./scripts/demo_night.sh
-./scripts/doctor.sh
-./cron/overnight_run.sh --force   # supervised live night
-# then: AUTOCODE_AUTOPILOT_ENABLED=1 && ./cron/install_autopilot_timers.sh
+./scripts/go_live.sh --local-only --first-night --enable-autopilot
 ```
 
+That bootstraps the box, provisions Notion DBs, seeds a Ready task, runs a mock night, optionally one live night, then enables the timer when doctor is green.
+
 First overnight run: stay nearby — [docs/supervised-first-run.md](docs/supervised-first-run.md).  
-Remote watch / intervene (Tailscale + Telegram + Notion): [docs/remote-ops.md](docs/remote-ops.md).  
+Remote watch / intervene: [docs/remote-ops.md](docs/remote-ops.md).  
 Full checklist: [docs/go-live.md](docs/go-live.md).
 
 ## What you configure (local only)

@@ -54,6 +54,7 @@ check_layout() {
     bootstrap/02_enable_maxn.sh
     bootstrap/03_install_gh.sh
     bootstrap/04_install_tailscale.sh
+    bootstrap/05_use_data_ssd.sh
     ollama/Modelfile.coder-64k
     ollama/install_ollama_jetson.sh
     ollama/create_coder_64k.sh
@@ -74,6 +75,8 @@ check_layout() {
     docs/hermes-overnight-skill.md
     scripts/demo_night.sh
     scripts/bootstrap_jetson.sh
+    scripts/go_live.sh
+    scripts/auth_github.sh
     scripts/doctor.sh
     scripts/smoke_hermes.sh
     scripts/delegate_cursor.sh
@@ -134,18 +137,21 @@ fi
 
 cat <<'EOF'
 
-Next (Jetson — preferred one-shot):
+Next (Jetson — fully auto once secrets are in .env):
+  # Put NOTION_TOKEN, NOTION_HUB_PAGE, GITHUB_TOKEN, WORKSPACE_REPOS in .env
+  ./scripts/go_live.sh --local-only --first-night --enable-autopilot
+
+  # Or step-by-step:
   ./scripts/bootstrap_jetson.sh
   ./scripts/doctor.sh
-  # then fill Notion + webhooks in .env, gh auth login, demo + supervised night
   # docs/go-live.md
 
 Manual path:
-  1. docs/notion-setup.md
+  1. docs/notion-setup.md  (or: python3 notion/client.py provision --seed)
   2. ./ollama/install_ollama_jetson.sh && ./ollama/create_coder_64k.sh
   3. ./hermes/install_hermes.sh && ./hermes/configure_local_primary.sh
-  4. Set CURSOR_WEBHOOK_URL / GROK_BOT_WEBHOOK_URL
-  5. Supervised night, then AUTOCODE_AUTOPILOT_ENABLED=1 + ./cron/install_autopilot_timers.sh
+  4. Optional cloud: CURSOR_WEBHOOK_URL / GROK_BOT_WEBHOOK_URL
+  5. ./scripts/go_live.sh --skip-bootstrap --first-night --enable-autopilot
 
 Never commit .env. Re-run: ./scripts/setup.sh --check
 EOF

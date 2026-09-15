@@ -17,16 +17,17 @@ Usage: scripts/bootstrap_jetson.sh [options]
 
 Ordered Jetson setup for Autocode:
   1. Dependency check
-  2. Swap (recommended 16G)
-  3. MAXN SUPER power mode (Jetson)
-  4. .env from .env.example (if missing)
-  5. Ollama + coder-64k model
-  6. Hermes install + local-primary config
-  7. Hermes smoke test
-  8. GitHub CLI install
-  9. Optional Tailscale install
- 10. Clone WORKSPACE_REPOS (if configured)
- 11. Doctor report
+  2. Data SSD layout (models / workspaces / swap on big disk)
+  3. Swap (16G default on SSD)
+  4. MAXN SUPER power mode (Jetson)
+  5. .env from .env.example (if missing)
+  6. Ollama + coder-64k model (into OLLAMA_MODELS)
+  7. Hermes install + local-primary config
+  8. Hermes smoke test
+  9. GitHub CLI install
+ 10. Optional Tailscale install
+ 11. Clone WORKSPACE_REPOS (if configured)
+ 12. Doctor report
 
 Options:
   --skip-swap         Do not create/enable swap
@@ -64,19 +65,31 @@ step() {
   echo "============================================================"
 }
 
-step "1/11 Dependency check"
+step "1/12 Dependency check"
 bash "${ROOT_DIR}/scripts/setup.sh" --check || true
 
-step "2/11 Swap"
+step "2/12 Data SSD layout (4TB-friendly)"
+bash "${ROOT_DIR}/bootstrap/05_use_data_ssd.sh" || {
+  echo "WARN: data SSD layout skipped — using defaults under /opt."
+}
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/.env" 2>/dev/null || true
+
+step "3/12 Swap (on SSD when AUTOCODE_DATA_ROOT is set)"
 if [[ "${SKIP_SWAP}" -eq 1 ]]; then
   echo "Skipped (--skip-swap)."
 else
-  bash "${ROOT_DIR}/bootstrap/01_setup_swap.sh" || {
-    echo "WARN: swap step failed or needs sudo. Continuing."
-  }
+  if [[ "$(id -u)" -eq 0 ]]; then
+    bash "${ROOT_DIR}/bootstrap/01_setup_swap.sh" || {
+      echo "WARN: swap step failed. Continuing."
+    }
+  else
+    echo "Swap needs root. Run after bootstrap:"
+    echo "  sudo SWAPFILE=\${SWAPFILE:-/swapfile} ./bootstrap/01_setup_swap.sh \${AUTOCODE_SWAP_GB:-16}"
+  fi
 fi
 
-step "3/11 MAXN SUPER"
+step "4/12 MAXN SUPER"
 if [[ "${SKIP_MAXN}" -eq 1 ]]; then
   echo "Skipped (--skip-maxn)."
 else
@@ -85,7 +98,7 @@ else
   }
 fi
 
-step "4/11 Environment file"
+step "5/12 Environment file"
 if [[ ! -f "${ROOT_DIR}/.env" ]]; then
   cp "${ROOT_DIR}/.env.example" "${ROOT_DIR}/.env"
   echo "Created .env from .env.example — edit secrets before a live night."
@@ -97,36 +110,43 @@ if ! grep -q '^AUTOCODE_AUTOPILOT_ENABLED=' "${ROOT_DIR}/.env"; then
   echo 'AUTOCODE_AUTOPILOT_ENABLED=0' >> "${ROOT_DIR}/.env"
 fi
 
-step "5/11 Ollama + coder-64k"
+step "6/12 Ollama + coder-64k (models → OLLAMA_MODELS / SSD)"
+# Ensure Ollama writes weights to the data SSD when configured.
+if [[ -n "${OLLAMA_MODELS:-}" ]]; then
+  mkdir -p "${OLLAMA_MODELS}"
+  export OLLAMA_MODELS
+  echo "OLLAMA_MODELS=$OLLAMA_MODELS"
+fi
 bash "${ROOT_DIR}/ollama/install_ollama_jetson.sh" || {
   echo "WARN: Ollama install failed. Install manually, then re-run."
 }
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/.env" 2>/dev/null || true
+[[ -n "${OLLAMA_MODELS:-}" ]] && export OLLAMA_MODELS
 bash "${ROOT_DIR}/ollama/create_coder_64k.sh" || {
   echo "WARN: model create failed (Ollama may still be starting). Retry later:"
   echo "  bash ollama/create_coder_64k.sh"
 }
 
-step "6/11 Hermes install"
+step "7/12 Hermes install"
 bash "${ROOT_DIR}/hermes/install_hermes.sh"
 
-step "7/11 Hermes local-primary config"
+step "8/12 Hermes local-primary config"
 bash "${ROOT_DIR}/hermes/configure_local_primary.sh"
 
-step "8/11 Hermes smoke"
+step "9/12 Hermes smoke"
 if bash "${ROOT_DIR}/scripts/smoke_hermes.sh"; then
   echo "Hermes smoke OK."
 else
   echo "WARN: Hermes smoke failed. Fix before a live night."
 fi
 
-step "9/11 GitHub CLI"
+step "10/12 GitHub CLI"
 bash "${ROOT_DIR}/bootstrap/03_install_gh.sh" || {
   echo "WARN: gh install failed."
 }
 
-step "10/11 Tailscale (optional)"
+step "11/12 Tailscale (optional)"
 if [[ "${SKIP_TAILSCALE}" -eq 1 ]]; then
   echo "Skipped (--skip-tailscale)."
 else
@@ -135,7 +155,7 @@ else
   }
 fi
 
-step "11/11 Clone workspaces + doctor"
+step "12/12 Clone workspaces + doctor"
 if [[ "${SKIP_CLONE}" -eq 1 ]]; then
   echo "Clone skipped (--skip-clone)."
 else
@@ -152,19 +172,21 @@ cat <<'EOF'
 Bootstrap finished (or as far as this host allows).
 ============================================================
 
-Remaining operator steps (cannot be fully automated here):
+Remaining operator steps:
 
-  1. Edit .env — Notion token + database IDs, webhook URLs
-  2. gh auth login
-  3. sudo tailscale up          # if installed
-  4. Create Notion DBs from docs/notion-setup.md (once)
-  5. scripts/demo_night.sh      # mock end-to-end
-  6. One supervised live night:
-       ./cron/overnight_run.sh --force
-       # or: python3 -m orchestrator.run_night --once
-  7. Enable autopilot when ready:
-       set AUTOCODE_AUTOPILOT_ENABLED=1 in .env
-       bash cron/install_autopilot_timers.sh
+  Prefer one-shot:  ./scripts/go_live.sh --local-only --first-night --enable-autopilot
+
+  Or manually:
+  1. Edit .env — Notion token + NOTION_HUB_PAGE (or DB ids), webhook URLs
+  2. ./scripts/auth_github.sh   # or: gh auth login
+  3. sudo SWAPFILE=... ./bootstrap/01_setup_swap.sh 16   # if swap not rooted yet
+  4. sudo tailscale up          # if installed
+  5. ./scripts/demo_night.sh
+  6. ./cron/overnight_run.sh --force
+  7. AUTOCODE_AUTOPILOT_ENABLED=1 + ./cron/install_autopilot_timers.sh
+
+With a 4TB SSD, models/workspaces/swap live under AUTOCODE_DATA_ROOT
+(see bootstrap/05_use_data_ssd.sh).
 
 Remote ops:
   scripts/status.sh

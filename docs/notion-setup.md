@@ -1,16 +1,26 @@
 # Notion setup (bring your own workspace)
 
-Autocode does **not** ship with anyone else's Notion IDs or tokens. Create these three databases in your workspace, then paste the IDs into `.env`.
+Autocode does **not** ship with anyone else's Notion IDs or tokens.
 
-## 1. Create a Notion integration
+## Fully automatic (recommended)
 
-1. Open [Notion → My integrations](https://www.notion.so/my-integrations).
-2. Create an internal integration (e.g. `Autocode`).
-3. Copy the secret → `NOTION_TOKEN` in `.env` (local only).
+1. Create an internal integration at [Notion → My integrations](https://www.notion.so/my-integrations).
+2. Copy the secret → `NOTION_TOKEN` in `.env`.
+3. Create an **empty page** (e.g. “Autocode Hub”), open **··· → Connections**, add the integration.
+4. Copy the page id from the URL → `NOTION_HUB_PAGE` in `.env`.
+5. Run:
 
-## 2. Create three databases
+```bash
+python3 notion/client.py provision --seed
+# or the full Jetson path:
+./scripts/go_live.sh --local-only
+```
 
-Suggested names: **Build Queue**, **Agent Runs**, **Escalation Log**.
+That creates **Build Queue**, **Agent Runs**, and **Escalation Log** under the hub page, writes the DB ids into `.env` + `notion/ids.yaml`, and seeds one **Ready + Local-safe** task.
+
+Re-running `provision` reuses existing DBs with the same titles (idempotent).
+
+## Manual schema (if you prefer hand-built DBs)
 
 ### Build Queue
 
@@ -21,10 +31,11 @@ Suggested names: **Build Queue**, **Agent Runs**, **Escalation Log**.
 | Priority | Select | `P0`–`P3` |
 | Complexity | Select | `Local-safe`, `Maybe local`, `Cloud-only` |
 | Model route | Select | `Local Hermes`, `Claude`, `Grok`, `Cursor Cloud` |
-| Repo | Select or Text | Which git repo to work in |
+| Repo | Text | Which git repo to work in |
 | Acceptance | Text | Definition of done |
 | Branch / PR | URL | Filled by autopilot |
 | Notes | Text | Optional |
+| Task ID | ID | Optional (`BLD` prefix) |
 
 ### Agent Runs
 
@@ -35,7 +46,6 @@ Suggested names: **Build Queue**, **Agent Runs**, **Escalation Log**.
 | Model used | Select | `Local`, `Claude`, `Grok`, `Cursor`, `Mixed` |
 | Summary | Text | What happened |
 | PR / commit | URL | Optional |
-| Tokens / cost note | Text | Optional |
 
 ### Escalation Log
 
@@ -48,25 +58,17 @@ Suggested names: **Build Queue**, **Agent Runs**, **Escalation Log**.
 | Context | Text | Branch + failure notes |
 | Related PR | URL | Optional |
 
-## 3. Share pages with the integration
-
-Open each database → **···** → **Connections** → add your Autocode integration.
-
-## 4. Copy IDs into `.env`
-
-Database ID = the 32-hex UUID in the Notion URL (with dashes).
+Share each DB with the integration, then set:
 
 ```bash
 NOTION_BUILD_QUEUE_DB=...
 NOTION_AGENT_RUNS_DB=...
 NOTION_ESCALATION_LOG_DB=...
-NOTION_HUB_PAGE=...   # optional parent page
 ```
 
-Optional: `cp notion/ids.example.yaml notion/ids.yaml` and fill IDs there too (`ids.yaml` is gitignored).
-
-## 5. Smoke test
+## Smoke test
 
 ```bash
+python3 notion/client.py doctor
 python3 notion/client.py list-ready
 ```

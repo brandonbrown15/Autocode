@@ -230,6 +230,196 @@ def cmd_claim(args: argparse.Namespace) -> None:
     print(f"Claimed {args.page_id} → Running")
 
 
+def upsert_env(key: str, value: str) -> None:
+    """Write or replace KEY=value in ROOT/.env (creates file if needed)."""
+    env_path = ROOT / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+    out: list[str] = []
+    found = False
+    for line in lines:
+        if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
+            out.append(f"{key}={value}")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        out.append(f"{key}={value}")
+    env_path.write_text("\n".join(out) + "\n")
+    os.environ[key] = value
+
+
+def _select_options(*names: str) -> dict[str, Any]:
+    return {"select": {"options": [{"name": n} for n in names]}}
+
+
+def _find_child_database(parent_page_id: str, title_text: str) -> str | None:
+    """Return database id if a child DB with this title already exists."""
+    cursor = None
+    while True:
+        body: dict[str, Any] = {
+            "filter": {"property": "object", "value": "database"},
+            "page_size": 100,
+        }
+        if cursor:
+            body["start_cursor"] = cursor
+        result = notion_request("POST", "/search", body)
+        for item in result.get("results", []):
+            if item.get("object") != "database":
+                continue
+            parent = item.get("parent") or {}
+            if parent.get("type") == "page_id" and parent.get("page_id") == parent_page_id:
+                titles = item.get("title") or []
+                name = "".join(t.get("plain_text", "") for t in titles)
+                if name == title_text:
+                    return item["id"]
+        if not result.get("has_more"):
+            break
+        cursor = result.get("next_cursor")
+    return None
+
+
+def _create_database(parent_page_id: str, title_text: str, properties: dict[str, Any]) -> str:
+    existing = _find_child_database(parent_page_id, title_text)
+    if existing:
+        print(f"Reuse existing DB '{title_text}' → {existing}")
+        return existing
+    body = {
+        "parent": {"type": "page_id", "page_id": parent_page_id},
+        "title": [{"type": "text", "text": {"content": title_text}}],
+        "properties": properties,
+    }
+    created = notion_request("POST", "/databases", body)
+    db = created["id"]
+    print(f"Created DB '{title_text}' → {db}")
+    return db
+
+
+def provision_databases(parent_page_id: str) -> dict[str, str]:
+    """Create Build Queue / Agent Runs / Escalation Log under a shared hub page."""
+    build_props = {
+        "Name": {"title": {}},
+        "Status": _select_options(
+            "Backlog", "Ready", "Running", "Needs review", "Done", "Blocked"
+        ),
+        "Priority": _select_options("P0", "P1", "P2", "P3"),
+        "Complexity": _select_options("Local-safe", "Maybe local", "Cloud-only"),
+        "Model route": _select_options("Local Hermes", "Claude", "Grok", "Cursor Cloud"),
+        "Repo": {"rich_text": {}},
+        "Acceptance": {"rich_text": {}},
+        "Branch / PR": {"url": {}},
+        "Notes": {"rich_text": {}},
+        "Task ID": {"unique_id": {"prefix": "BLD"}},
+    }
+    runs_props = {
+        "Name": {"title": {}},
+        "Outcome": _select_options("Success", "Partial", "Failed", "Escalated", "Skipped"),
+        "Summary": {"rich_text": {}},
+        "Model used": _select_options("Local", "Claude", "Grok", "Cursor", "Mixed"),
+        "PR / commit": {"url": {}},
+    }
+    esc_props = {
+        "Name": {"title": {}},
+        "Status": _select_options("Open", "Assigned", "Resolved"),
+        "Why escalated": _select_options(
+            "Too complex", "Tool fail", "Tests failing", "Needs secrets", "Ambiguous"
+        ),
+        "Send to": _select_options("Claude", "Grok Bot", "Cursor Cloud", "Human"),
+        "Context": {"rich_text": {}},
+        "Related PR": {"url": {}},
+    }
+
+    ids = {
+        "NOTION_BUILD_QUEUE_DB": _create_database(parent_page_id, "Build Queue", build_props),
+        "NOTION_AGENT_RUNS_DB": _create_database(parent_page_id, "Agent Runs", runs_props),
+        "NOTION_ESCALATION_LOG_DB": _create_database(
+            parent_page_id, "Escalation Log", esc_props
+        ),
+    }
+    upsert_env("NOTION_HUB_PAGE", parent_page_id)
+    for key, value in ids.items():
+        upsert_env(key, value)
+    # Keep ids.yaml in sync when present/expected
+    ids_path = ROOT / "notion" / "ids.yaml"
+    ids_path.write_text(
+        "\n".join(
+            [
+                f"build_queue: {ids['NOTION_BUILD_QUEUE_DB']}",
+                f"agent_runs: {ids['NOTION_AGENT_RUNS_DB']}",
+                f"escalation_log: {ids['NOTION_ESCALATION_LOG_DB']}",
+                f"hub_page: {parent_page_id}",
+                "",
+            ]
+        )
+    )
+    return ids
+
+
+def seed_ready_task(
+    name: str,
+    acceptance: str,
+    repo: str = "",
+    priority: str = "P3",
+    complexity: str = "Local-safe",
+    model_route: str = "Local Hermes",
+) -> str:
+    """Insert one Ready task for the first supervised/auto night."""
+    props: dict[str, Any] = {
+        "Name": {"title": title(name)},
+        "Status": {"select": {"name": "Ready"}},
+        "Priority": {"select": {"name": priority}},
+        "Complexity": {"select": {"name": complexity}},
+        "Model route": {"select": {"name": model_route}},
+        "Acceptance": {"rich_text": rich_text(acceptance)},
+        "Notes": {"rich_text": rich_text("Seeded by Autocode go-live")},
+    }
+    if repo:
+        props["Repo"] = {"rich_text": rich_text(repo)}
+    page = notion_request(
+        "POST",
+        "/pages",
+        {"parent": {"database_id": db_id("build_queue")}, "properties": props},
+    )
+    return page["id"]
+
+
+def cmd_provision(args: argparse.Namespace) -> None:
+    parent = (
+        args.parent
+        or os.environ.get("NOTION_HUB_PAGE", "").strip()
+        or os.environ.get("NOTION_PARENT_PAGE", "").strip()
+    )
+    if not parent:
+        raise SystemExit(
+            "Need a Notion parent page id: pass --parent or set NOTION_HUB_PAGE.\n"
+            "Create an empty page, share it with your Autocode integration, then re-run."
+        )
+    ids = provision_databases(parent)
+    print("Wrote DB ids to .env and notion/ids.yaml")
+    for k, v in ids.items():
+        print(f"  {k}={v}")
+    if args.seed:
+        page_id = seed_ready_task(
+            name=args.seed_title,
+            acceptance=args.seed_acceptance,
+            repo=args.seed_repo or "",
+        )
+        print(f"Seeded Ready task → {page_id}")
+
+
+def cmd_seed(args: argparse.Namespace) -> None:
+    page_id = seed_ready_task(
+        name=args.title,
+        acceptance=args.acceptance,
+        repo=args.repo or "",
+        priority=args.priority,
+        complexity=args.complexity,
+        model_route=args.model_route,
+    )
+    print(f"Seeded Ready task → {page_id}")
+
+
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Autocode Notion helpers")
@@ -240,6 +430,32 @@ def main() -> None:
 
     p_doc = sub.add_parser("doctor", help="Verify Notion token + database access")
     p_doc.set_defaults(func=cmd_doctor)
+
+    p_prov = sub.add_parser(
+        "provision",
+        help="Auto-create Build Queue / Agent Runs / Escalation Log under NOTION_HUB_PAGE",
+    )
+    p_prov.add_argument("--parent", help="Notion parent page id (defaults to NOTION_HUB_PAGE)")
+    p_prov.add_argument("--seed", action="store_true", help="Also insert one Ready Local-safe task")
+    p_prov.add_argument("--seed-title", default="Autocode smoke: add README tip")
+    p_prov.add_argument(
+        "--seed-acceptance",
+        default="Open a tiny PR that adds one helpful sentence to README. Do not touch secrets.",
+    )
+    p_prov.add_argument("--seed-repo", default="")
+    p_prov.set_defaults(func=cmd_provision)
+
+    p_seed = sub.add_parser("seed", help="Insert a Ready Local-safe Build Queue task")
+    p_seed.add_argument("--title", default="Autocode smoke: add README tip")
+    p_seed.add_argument(
+        "--acceptance",
+        default="Open a tiny PR that adds one helpful sentence to README. Do not touch secrets.",
+    )
+    p_seed.add_argument("--repo", default="")
+    p_seed.add_argument("--priority", default="P3")
+    p_seed.add_argument("--complexity", default="Local-safe")
+    p_seed.add_argument("--model-route", default="Local Hermes")
+    p_seed.set_defaults(func=cmd_seed)
 
     p_claim = sub.add_parser("claim", help="Mark a Build Queue page Running")
     p_claim.add_argument("page_id")

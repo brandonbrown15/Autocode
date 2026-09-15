@@ -26,7 +26,26 @@ echo "== Autocode doctor =="
 if [[ "$(uname -m)" == "aarch64" ]]; then pass "aarch64"; else warn_msg "not aarch64 (uname=$(uname -m))"; fi
 if command -v nvpmodel >/dev/null 2>&1; then pass "nvpmodel available"; else warn_msg "nvpmodel missing (not Jetson?)"; fi
 swap_kb=$(awk '/SwapTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
-if [[ "${swap_kb:-0}" -ge 2000000 ]]; then pass "swap=${swap_kb}kB"; else warn_msg "swap low (${swap_kb}kB) — run ./bootstrap/01_setup_swap.sh"; fi
+if [[ "${swap_kb:-0}" -ge 2000000 ]]; then pass "swap=${swap_kb}kB"; else warn_msg "swap low (${swap_kb}kB) — sudo ./bootstrap/01_setup_swap.sh"; fi
+
+# Data SSD / free space
+DATA_ROOT="${AUTOCODE_DATA_ROOT:-}"
+if [[ -n "$DATA_ROOT" && -d "$DATA_ROOT" ]]; then
+  pass "AUTOCODE_DATA_ROOT=$DATA_ROOT"
+  free_gb="$(df -BG --output=avail "$DATA_ROOT" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)"
+  if [[ "${free_gb:-0}" -ge 50 ]]; then
+    pass "data free=${free_gb}G"
+  else
+    warn_msg "data free only ${free_gb}G under $DATA_ROOT"
+  fi
+  if [[ -n "${OLLAMA_MODELS:-}" ]]; then
+    pass "OLLAMA_MODELS=$OLLAMA_MODELS"
+  else
+    warn_msg "OLLAMA_MODELS unset — large models may fill root disk"
+  fi
+else
+  warn_msg "AUTOCODE_DATA_ROOT unset — run ./bootstrap/05_use_data_ssd.sh to park models/swap on your 4TB SSD"
+fi
 
 # Ollama
 HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
@@ -85,35 +104,56 @@ else
   warn_msg "Notion not configured (mock nights still work)"
 fi
 
-# Cloud delegates
+# Cloud delegates (optional when AUTOCODE_LOCAL_ONLY=1)
 CURSOR_CMD="${AUTOCODE_CURSOR_DELEGATE_CMD:-}"
 GROK_CMD="${AUTOCODE_GROK_DELEGATE_CMD:-}"
+LOCAL_ONLY="${AUTOCODE_LOCAL_ONLY:-0}"
 if [[ -n "$CURSOR_CMD" ]]; then
   if [[ "$CURSOR_CMD" == *stub* ]]; then
-    warn_msg "Cursor delegate is stub — set CURSOR_WEBHOOK_URL + ./scripts/delegate_cursor.sh"
+    if [[ "$LOCAL_ONLY" == "1" ]]; then
+      warn_msg "Cursor delegate is stub (ok with AUTOCODE_LOCAL_ONLY=1)"
+    else
+      warn_msg "Cursor delegate is stub — set CURSOR_WEBHOOK_URL + ./scripts/delegate_cursor.sh"
+    fi
   else
     pass "AUTOCODE_CURSOR_DELEGATE_CMD set"
   fi
 else
-  warn_msg "Cursor delegate unset — cloud Cursor escalations will fall through"
+  if [[ "$LOCAL_ONLY" == "1" ]]; then
+    warn_msg "Cursor delegate unset (ok with AUTOCODE_LOCAL_ONLY=1)"
+  else
+    warn_msg "Cursor delegate unset — cloud Cursor escalations will fall through"
+  fi
 fi
 if [[ -n "${CURSOR_WEBHOOK_URL:-}" ]]; then
   pass "CURSOR_WEBHOOK_URL set"
 elif [[ -n "$CURSOR_CMD" && "$CURSOR_CMD" != *stub* ]]; then
   warn_msg "CURSOR_WEBHOOK_URL empty (ok if custom launcher needs no URL)"
+elif [[ "$LOCAL_ONLY" == "1" ]]; then
+  pass "CURSOR_WEBHOOK_URL optional (AUTOCODE_LOCAL_ONLY=1)"
 fi
 
 if [[ -n "$GROK_CMD" ]]; then
   if [[ "$GROK_CMD" == *stub* ]]; then
-    warn_msg "Grok Bot delegate is stub — set GROK_BOT_WEBHOOK_URL + ./scripts/delegate_grok.sh"
+    if [[ "$LOCAL_ONLY" == "1" ]]; then
+      warn_msg "Grok Bot delegate is stub (ok with AUTOCODE_LOCAL_ONLY=1)"
+    else
+      warn_msg "Grok Bot delegate is stub — set GROK_BOT_WEBHOOK_URL + ./scripts/delegate_grok.sh"
+    fi
   else
     pass "AUTOCODE_GROK_DELEGATE_CMD set"
   fi
 else
-  warn_msg "Grok Bot delegate unset"
+  if [[ "$LOCAL_ONLY" == "1" ]]; then
+    warn_msg "Grok Bot delegate unset (ok with AUTOCODE_LOCAL_ONLY=1)"
+  else
+    warn_msg "Grok Bot delegate unset"
+  fi
 fi
 if [[ -n "${GROK_BOT_WEBHOOK_URL:-}" ]]; then
   pass "GROK_BOT_WEBHOOK_URL set"
+elif [[ "$LOCAL_ONLY" == "1" ]]; then
+  pass "GROK_BOT_WEBHOOK_URL optional (AUTOCODE_LOCAL_ONLY=1)"
 fi
 
 if [[ -n "${XAI_API_KEY:-}" && "${AUTOCODE_DISABLE_METERED_GROK:-1}" != "1" ]]; then
