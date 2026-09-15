@@ -28,46 +28,49 @@ Sticker $/MTok is misleading for overnight **agent loops** (big prompts + many t
 | 4 | **Claude API** (Sonnet ~$2/$10 per MTok) | Metered; OK for occasional mid jobs |
 | 5 | **Direct xAI Grok API** ($2/$6, doubles past ~200k context) | **Often the worst** for agents — uncapped; $80/day is easy |
 
-**Recommendation if you buy Cursor Ultra:** drop Claude Code *and* leave `XAI_API_KEY` empty overnight. Use Grok **through Cursor**, not the raw xAI meter.
+**Recommendation:** Cursor Ultra + your **Grok Bot** webhook (flat SuperGrok / Telegram bot). Leave `XAI_API_KEY` empty overnight. Autocode picks the cheaper configured cloud first.
 
 ```bash
-# .env (local only) — your Ultra consolidation setup
-AUTOCODE_COST_PROFILE=cursor-ultra
-AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'
-# Leave empty on purpose:
+# .env (local only) — Cursor Ultra + Grok Bot, cheaper first
+AUTOCODE_COST_PROFILE=cursor-grok
+AUTOCODE_CLOUD_PREFERENCE=cursor    # or grok if Bot is cheaper for you
+AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'  # replace with real
+AUTOCODE_GROK_DELEGATE_CMD='./scripts/delegate_grok_stub.sh'      # replace with real
+AUTOCODE_DISABLE_METERED_GROK=1
+# Leave empty:
 # XAI_API_KEY=
 # ANTHROPIC_API_KEY=
-AUTOCODE_DISABLE_METERED_GROK=1
 ```
 
 ### Profiles
 
 | Profile | Ladder | Use when |
 |---------|--------|----------|
-| `cursor-ultra` | Cursor Cloud → Human | Paying Ultra; leave Claude Code |
-| `claude-max` | Claude → Cursor → Human | Keeping Claude Max as mid |
-| `metered` | Claude → Cursor → Grok Bot → Human | Pure API keys (Grok last) |
-| `default` | Cursor → Claude → Human | Mixed; **no** metered Grok by default |
+| **`cursor-grok`** | **Cursor → Grok Bot → Human** | **Ultra + Bot (recommended)** |
+| `cursor-ultra` | Cursor Cloud → Human | Ultra only |
+| `claude-max` | Claude → Cursor → Human | Keeping Claude Max |
+| `metered` | Claude → Cursor → Grok Bot → Human | Pure API keys |
+| `default` | same as `cursor-grok` | Mixed Cursor + Bot |
 
-Override either way:
+`AUTOCODE_CLOUD_PREFERENCE=grok` swaps Bot ahead of Cursor when your Bot plan is flatter.
 
 ```bash
-AUTOCODE_COST_PROFILE=cursor-ultra
+AUTOCODE_COST_PROFILE=cursor-grok
 # or fully custom:
-AUTOCODE_COST_LADDER=Cursor Cloud,Human
+AUTOCODE_COST_LADDER=Cursor Cloud,Grok Bot,Human
 ```
 
-## Why mid-range still exists
+## Tier → target (`cursor-grok`)
 
-With the default profile, mid tasks go to **Claude** (if configured) so light Cursor pool usage isn’t burned on ordinary Cloud-only work. On `cursor-ultra`, mid and heavy both use **Cursor Cloud** (your included Grok / Composer pool).
+| Tier | Target |
+|------|--------|
+| local | Local Hermes |
+| cheap | Cursor Cloud (Ultra pool — usually cheaper) |
+| standard (mid) | Grok Bot (your webhook / SuperGrok agent) |
+| premium | Cursor Cloud (capability preference) |
+| human | Human |
 
-| Tier | Default (`default`) | `cursor-ultra` |
-|------|---------------------|----------------|
-| local | Local Hermes | Local Hermes |
-| cheap | Cursor Cloud | Cursor Cloud |
-| standard (mid) | Claude | Cursor Cloud |
-| premium | Cursor Cloud | Cursor Cloud |
-| human | Human | Human |
+See [go-live.md](go-live.md) for the operator checklist.
 
 ## Local path
 

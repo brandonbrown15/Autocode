@@ -18,16 +18,21 @@ from typing import Any
 
 
 # Profiles ranked by *effective overnight spend* (not raw $/MTok sticker price).
-# Direct Grok API is last / omitted — agent loops rack up bills fast.
+# Direct xAI/OpenRouter Grok API is last / omitted — agent loops rack up bills fast.
+# "Grok Bot" here means your webhook / Telegram / SuperGrok agent launcher
+# (AUTOCODE_GROK_DELEGATE_CMD), not uncapped XAI_API_KEY.
 COST_PROFILES: dict[str, tuple[str, ...]] = {
-    # Pay Cursor Ultra; drop Claude Code + raw xAI. Grok comes via Cursor.
+    # Cursor Ultra + Grok Bot: cheaper Ultra pool first, then your Grok Bot.
+    # Swap with AUTOCODE_CLOUD_PREFERENCE=grok if Bot is the flatter plan.
+    "cursor-grok": ("Cursor Cloud", "Grok Bot", "Human"),
+    # Pay Cursor Ultra only; drop Claude Code + raw xAI. Grok via Cursor Models.
     "cursor-ultra": ("Cursor Cloud", "Human"),
     # Keep Claude Max as mid; Cursor for heavy; no metered Grok.
     "claude-max": ("Claude", "Cursor Cloud", "Human"),
-    # Pay-as-you-go APIs — Claude before Cursor; Grok direct is last resort.
+    # Pay-as-you-go APIs — Claude before Cursor; metered Grok last resort.
     "metered": ("Claude", "Cursor Cloud", "Grok Bot", "Human"),
-    # Default after cost research: Cursor first; Claude mid; omit metered Grok.
-    "default": ("Cursor Cloud", "Claude", "Human"),
+    # Default after cost research: Cursor + Grok Bot (no Claude required).
+    "default": ("Cursor Cloud", "Grok Bot", "Human"),
 }
 
 DEFAULT_LADDER = COST_PROFILES["default"]
@@ -72,15 +77,34 @@ class RouteDecision:
     score: int
 
 
+def _prefer_grok_first() -> bool:
+    return (os.environ.get("AUTOCODE_CLOUD_PREFERENCE", "cursor") or "cursor").strip().lower() in (
+        "grok",
+        "grok-bot",
+        "grok_bot",
+    )
+
+
 def _ladder() -> list[str]:
-    """Resolve ladder: explicit AUTOCODE_COST_LADDER wins, else profile."""
+    """Resolve ladder: explicit AUTOCODE_COST_LADDER wins, else profile (+ preference)."""
     raw = os.environ.get("AUTOCODE_COST_LADDER", "")
     if raw.strip():
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         if parts:
             return parts
     profile = (os.environ.get("AUTOCODE_COST_PROFILE", "default") or "default").strip().lower()
-    return list(COST_PROFILES.get(profile, COST_PROFILES["default"]))
+    ladder = list(COST_PROFILES.get(profile, COST_PROFILES["default"]))
+    # Optional swap: put Grok Bot before Cursor when Bot is the cheaper flat plan.
+    if _prefer_grok_first() and "Grok Bot" in ladder and "Cursor Cloud" in ladder:
+        reordered: list[str] = []
+        for name in ("Grok Bot", "Cursor Cloud"):
+            if name in ladder and name not in reordered:
+                reordered.append(name)
+        for item in ladder:
+            if item not in reordered:
+                reordered.append(item)
+        return reordered
+    return ladder
 
 
 def _available(target: str) -> bool:
@@ -89,7 +113,10 @@ def _available(target: str) -> bool:
     if target == "Human":
         return True
     if target == "Grok Bot":
-        # Prefer Cursor Ultra for Grok; raw keys are opt-in expensive.
+        # Custom Bot webhook / Telegram launcher = OK (flat SuperGrok / your bot).
+        if os.environ.get("AUTOCODE_GROK_DELEGATE_CMD"):
+            return True
+        # Raw xAI/OpenRouter meters are opt-in expensive.
         if os.environ.get("AUTOCODE_DISABLE_METERED_GROK", "").lower() in (
             "1",
             "true",
@@ -97,8 +124,7 @@ def _available(target: str) -> bool:
         ):
             return False
         return bool(
-            os.environ.get("AUTOCODE_GROK_DELEGATE_CMD")
-            or os.environ.get("XAI_API_KEY")
+            os.environ.get("XAI_API_KEY")
             or os.environ.get("OPENROUTER_API_KEY")
         )
     if target == "Claude":
@@ -185,10 +211,11 @@ def tier_for_score(score: int) -> str:
 
 
 def _order_for_tier(tier: str, cloud: list[str]) -> list[str]:
-    """Map semantic tiers onto providers with cost + capability bias.
+    """Map semantic tiers onto providers.
 
-    Metered Grok Bot is always last among cloud options — agent loops are costly.
-    Premium (hard) work prefers Cursor Cloud capability when present.
+    Ladder order is cost order. Premium (hard) work prefers Cursor capability
+    when present. Grok Bot stays in its ladder slot for cheap/standard — it is
+    only last among *premium fallbacks* when other options exist.
     """
     if len(cloud) == 1:
         return [cloud[0], "Human"]
@@ -196,25 +223,20 @@ def _order_for_tier(tier: str, cloud: list[str]) -> list[str]:
     cheap = cloud[0]
     mid = cloud[1] if len(cloud) > 1 else cheap
 
-    def without_grok_first(seq: list[str]) -> list[str]:
-        rest = [c for c in seq if c != "Grok Bot"]
-        grok = [c for c in seq if c == "Grok Bot"]
-        return rest + grok
-
     if tier == "cheap":
-        return without_grok_first(cloud) + ["Human"]
+        return cloud + ["Human"]
     if tier == "standard":
         others = [c for c in cloud if c != mid]
-        return without_grok_first([mid] + others) + ["Human"]
+        return [mid] + others + ["Human"]
     if tier == "premium":
-        preferred = []
+        preferred: list[str] = []
         for name in ("Cursor Cloud", "Claude", "Grok Bot"):
             if name in cloud and name not in preferred:
                 preferred.append(name)
         for c in cloud:
             if c not in preferred:
                 preferred.append(c)
-        return without_grok_first(preferred) + ["Human"]
+        return preferred + ["Human"]
     return ["Human"]
 
 

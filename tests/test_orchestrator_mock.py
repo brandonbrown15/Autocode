@@ -71,9 +71,12 @@ class OrchestratorMockTests(unittest.TestCase):
         kinds = [e["kind"] for e in self.sink.events]
         self.assertIn("escalation", kinds)
 
-    def test_mid_range_cloud_only_goes_claude_in_mock(self) -> None:
-        os.environ["ANTHROPIC_API_KEY"] = "test-anthropic"
+    def test_mid_range_cloud_only_goes_grok_bot_in_mock(self) -> None:
+        os.environ["AUTOCODE_GROK_DELEGATE_CMD"] = str(
+            Path(__file__).resolve().parents[1] / "scripts" / "delegate_grok_stub.sh"
+        )
         os.environ["CURSOR_API_KEY"] = "test-cursor"
+        os.environ["AUTOCODE_DISABLE_METERED_GROK"] = "1"
         hw = HardwareSnapshot(8000, 16000, 40.0, 0.2, False)
         task = Task(
             page_id="p4",
@@ -88,7 +91,7 @@ class OrchestratorMockTests(unittest.TestCase):
         digest: list[str] = []
         result = process_task(task, hw, digest, self.sink, mock=True)
         self.assertEqual(result.outcome, "Escalated")
-        self.assertEqual(result.escalated_to, "Claude")
+        self.assertEqual(result.escalated_to, "Grok Bot")
 
     def test_low_ram_forces_escalate(self) -> None:
         hw = HardwareSnapshot(400, 8000, 40.0, 0.2, True)

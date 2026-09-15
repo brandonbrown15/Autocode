@@ -71,7 +71,7 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 python3 orchestrator/run_night.py --mock
 ```
 
-Local Hermes handles Local-safe work (with retries). Harder work is scored and sent up a **cost ladder** — prefer **Cursor Ultra** (included Grok) over metered xAI Grok API, with optional Claude mid. Direct Grok keys are demoted after cost research. See [docs/routing.md](docs/routing.md).
+Local Hermes handles Local-safe work (with retries). Harder work goes up a **cost ladder** — **Cursor Ultra** first, then **Grok Bot**, Human last. Metered xAI keys stay off overnight. See [docs/routing.md](docs/routing.md) and [docs/go-live.md](docs/go-live.md).
 
 ## Guardrails
 
@@ -86,6 +86,7 @@ Details: [docs/guardrails.md](docs/guardrails.md) · [docs/security.md](docs/sec
 
 - [Notion setup](docs/notion-setup.md) — recreate databases in *your* workspace
 - [Routing / escalation](docs/routing.md) — local vs cloud decision tree
+- [Go live checklist](docs/go-live.md) — what’s left for overnight ops
 - [Architecture](docs/architecture.md)
 - [Jetson notes](docs/jetson.md)
 - [Contributing](CONTRIBUTING.md)
