@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Example Cursor / cloud handoff. Replace with your real agent launcher.
-# Receives AUTOCODE_DELEGATE_PAYLOAD pointing at a JSON file.
+# Example / demo Cursor handoff. Always exits 0 after printing the payload.
+# For live nights use ./scripts/delegate_cursor.sh + CURSOR_WEBHOOK_URL.
 set -euo pipefail
 
 PAYLOAD="${AUTOCODE_DELEGATE_PAYLOAD:-}"
@@ -9,11 +9,8 @@ if [[ -z "$PAYLOAD" || ! -f "$PAYLOAD" ]]; then
   exit 1
 fi
 
-echo "Would delegate to Cursor Cloud with payload:"
+echo "(stub) Would delegate to Cursor Cloud with payload:"
 head -c 800 "$PAYLOAD"
 echo
-echo "(stub) Wire this to your Cursor Cloud / agent API when ready."
-# Example shape for a future integration:
-# cursor agent --file "$PAYLOAD"
-# or: curl -X POST "$CURSOR_WEBHOOK_URL" -d @"$PAYLOAD"
+echo "(stub) Live: set CURSOR_WEBHOOK_URL and AUTOCODE_CURSOR_DELEGATE_CMD=./scripts/delegate_cursor.sh"
 exit 0

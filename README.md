@@ -23,21 +23,21 @@ cd Autocode
 ./scripts/setup.sh --check  # verify layout + no secrets tracked
 ```
 
-### On the Jetson (or Linux aarch64/x86_64 host)
+### On the Jetson (preferred)
 
 ```bash
-./bootstrap/00_check_jetson.sh
-./ollama/install_ollama_jetson.sh
-./ollama/create_coder_64k.sh
-./hermes/install_hermes.sh
-./hermes/configure_local_primary.sh
-# optional: ./hermes/configure_fallbacks.sh
-./cron/install_autopilot_timers.sh
+./scripts/bootstrap_jetson.sh   # swap, MAXN, Ollama, Hermes, gh, Tailscale, doctor
+# edit .env — Notion + CURSOR_WEBHOOK_URL + GROK_BOT_WEBHOOK_URL
+gh auth login
+./scripts/demo_night.sh
+./scripts/doctor.sh
+./cron/overnight_run.sh --force   # supervised live night
+# then: AUTOCODE_AUTOPILOT_ENABLED=1 && ./cron/install_autopilot_timers.sh
 ```
 
 First overnight run: stay nearby — [docs/supervised-first-run.md](docs/supervised-first-run.md).  
 Remote watch / intervene (Tailscale + Telegram + Notion): [docs/remote-ops.md](docs/remote-ops.md).  
-Full checklist: [docs/go-live.md](docs/go-live.md) — **not plug-and-play until Hermes/Notion/delegates are wired.**
+Full checklist: [docs/go-live.md](docs/go-live.md).
 
 ## What you configure (local only)
 
@@ -55,12 +55,15 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 
 | Path | Purpose |
 |------|---------|
-| `scripts/setup.sh` | One-command local setup + hygiene check |
-| `bootstrap/` | Host checks + swap helper |
+| `scripts/bootstrap_jetson.sh` | One-shot Jetson bootstrap |
+| `scripts/doctor.sh` | Go-live health report |
+| `scripts/setup.sh` | Local `.env` + hygiene check |
+| `scripts/delegate_*.sh` | Cursor / Grok Bot webhook handoff |
+| `bootstrap/` | Host checks, swap, MAXN, gh, Tailscale |
 | `ollama/` | Ollama install + `coder-64k` Modelfile |
-| `hermes/` | Hermes config stubs |
+| `hermes/` | Real install + local Ollama config |
 | `notion/` | REST helpers (token from env only) |
-| `cron/` | Overnight systemd timer |
+| `cron/` | Overnight systemd timer (gated by autopilot flag) |
 | `orchestrator/` | Local-first router + cloud escalation |
 | `docs/` | Guardrails, Notion schema, security, routing |
 

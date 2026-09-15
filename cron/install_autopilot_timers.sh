@@ -26,4 +26,6 @@ else
 fi
 
 echo "Installed autocode-overnight.timer ($MODE)."
-echo "Dry-run: $ROOT/cron/overnight_run.sh"
+echo "Timer runs call overnight_run.sh — live work requires AUTOCODE_AUTOPILOT_ENABLED=1 in .env"
+echo "Supervised once: $ROOT/cron/overnight_run.sh --force"
+echo "Dry-run: $ROOT/cron/overnight_run.sh --dry-run"

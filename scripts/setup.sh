@@ -50,6 +50,10 @@ check_layout() {
     SECURITY.md
     CONTRIBUTING.md
     bootstrap/00_check_jetson.sh
+    bootstrap/01_setup_swap.sh
+    bootstrap/02_enable_maxn.sh
+    bootstrap/03_install_gh.sh
+    bootstrap/04_install_tailscale.sh
     ollama/Modelfile.coder-64k
     ollama/install_ollama_jetson.sh
     ollama/create_coder_64k.sh
@@ -66,7 +70,14 @@ check_layout() {
     docs/guardrails.md
     docs/supervised-first-run.md
     docs/routing.md
+    docs/go-live.md
+    docs/hermes-overnight-skill.md
     scripts/demo_night.sh
+    scripts/bootstrap_jetson.sh
+    scripts/doctor.sh
+    scripts/smoke_hermes.sh
+    scripts/delegate_cursor.sh
+    scripts/delegate_grok.sh
   )
   local missing=0
   for f in "${required[@]}"; do
@@ -123,12 +134,18 @@ fi
 
 cat <<'EOF'
 
-Next:
-  1. docs/notion-setup.md  — create DBs in YOUR Notion
-  2. ./bootstrap/00_check_jetson.sh
-  3. ./ollama/install_ollama_jetson.sh && ./ollama/create_coder_64k.sh
-  4. ./hermes/install_hermes.sh && ./hermes/configure_local_primary.sh
-  5. ./cron/install_autopilot_timers.sh
+Next (Jetson — preferred one-shot):
+  ./scripts/bootstrap_jetson.sh
+  ./scripts/doctor.sh
+  # then fill Notion + webhooks in .env, gh auth login, demo + supervised night
+  # docs/go-live.md
+
+Manual path:
+  1. docs/notion-setup.md
+  2. ./ollama/install_ollama_jetson.sh && ./ollama/create_coder_64k.sh
+  3. ./hermes/install_hermes.sh && ./hermes/configure_local_primary.sh
+  4. Set CURSOR_WEBHOOK_URL / GROK_BOT_WEBHOOK_URL
+  5. Supervised night, then AUTOCODE_AUTOPILOT_ENABLED=1 + ./cron/install_autopilot_timers.sh
 
 Never commit .env. Re-run: ./scripts/setup.sh --check
 EOF

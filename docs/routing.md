@@ -34,8 +34,10 @@ Sticker $/MTok is misleading for overnight **agent loops** (big prompts + many t
 # .env (local only) — Cursor Ultra + Grok Bot, cheaper first
 AUTOCODE_COST_PROFILE=cursor-grok
 AUTOCODE_CLOUD_PREFERENCE=cursor    # or grok if Bot is cheaper for you
-AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'  # replace with real
-AUTOCODE_GROK_DELEGATE_CMD='./scripts/delegate_grok_stub.sh'      # replace with real
+AUTOCODE_CURSOR_DELEGATE_CMD=./scripts/delegate_cursor.sh
+AUTOCODE_GROK_DELEGATE_CMD=./scripts/delegate_grok.sh
+CURSOR_WEBHOOK_URL=https://…        # required for live Cursor handoff
+GROK_BOT_WEBHOOK_URL=https://…      # required for live Grok Bot handoff
 AUTOCODE_DISABLE_METERED_GROK=1
 # Leave empty:
 # XAI_API_KEY=

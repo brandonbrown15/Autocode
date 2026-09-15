@@ -193,6 +193,38 @@ def cmd_list_ready(_: argparse.Namespace) -> None:
         print(f"  id={page['id']}")
 
 
+def cmd_doctor(_: argparse.Namespace) -> None:
+    """Verify token + DB access. Exit 0 only if all configured DBs respond."""
+    token = os.environ.get("NOTION_TOKEN", "").strip()
+    if not token:
+        print("FAIL: NOTION_TOKEN unset")
+        raise SystemExit(1)
+
+    checks = [
+        ("build_queue", "NOTION_BUILD_QUEUE_DB"),
+        ("agent_runs", "NOTION_AGENT_RUNS_DB"),
+        ("escalation_log", "NOTION_ESCALATION_LOG_DB"),
+    ]
+    failed = 0
+    for name, env_key in checks:
+        value = os.environ.get(env_key, "").strip()
+        if not value:
+            print(f"WARN: {env_key} unset — skip")
+            continue
+        try:
+            notion_request("GET", f"/databases/{value}")
+            print(f"OK   {name} ({env_key})")
+        except SystemExit as exc:
+            failed += 1
+            print(f"FAIL {name}: {exc}")
+    if failed:
+        raise SystemExit(1)
+    if not any(os.environ.get(k, "").strip() for _, k in checks):
+        print("FAIL: no Notion database IDs configured")
+        raise SystemExit(1)
+    print("Notion doctor passed")
+
+
 def cmd_claim(args: argparse.Namespace) -> None:
     claim_task(args.page_id)
     print(f"Claimed {args.page_id} → Running")
@@ -205,6 +237,9 @@ def main() -> None:
 
     p_list = sub.add_parser("list-ready", help="List Ready + Local-safe Build Queue items")
     p_list.set_defaults(func=cmd_list_ready)
+
+    p_doc = sub.add_parser("doctor", help="Verify Notion token + database access")
+    p_doc.set_defaults(func=cmd_doctor)
 
     p_claim = sub.add_parser("claim", help="Mark a Build Queue page Running")
     p_claim.add_argument("page_id")

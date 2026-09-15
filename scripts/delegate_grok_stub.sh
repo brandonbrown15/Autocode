@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Example Grok Bot handoff. Replace with your Telegram/webhook/agent launcher.
-# Receives AUTOCODE_DELEGATE_PAYLOAD pointing at a JSON escalation file.
+# Example / demo Grok Bot handoff. Always exits 0 after printing the payload.
+# For live nights use ./scripts/delegate_grok.sh + GROK_BOT_WEBHOOK_URL.
 set -euo pipefail
 
 PAYLOAD="${AUTOCODE_DELEGATE_PAYLOAD:-}"
@@ -9,9 +9,8 @@ if [[ -z "$PAYLOAD" || ! -f "$PAYLOAD" ]]; then
   exit 1
 fi
 
-echo "Would hand off to Grok Bot with payload:"
+echo "(stub) Would delegate to Grok Bot with payload:"
 head -c 800 "$PAYLOAD"
 echo
-echo "(stub) Point AUTOCODE_GROK_DELEGATE_CMD at your real Grok Bot webhook, e.g.:"
-echo "  curl -X POST \"\$GROK_BOT_WEBHOOK_URL\" -H 'Content-Type: application/json' -d @\"\$AUTOCODE_DELEGATE_PAYLOAD\""
+echo "(stub) Live: set GROK_BOT_WEBHOOK_URL and AUTOCODE_GROK_DELEGATE_CMD=./scripts/delegate_grok.sh"
 exit 0
