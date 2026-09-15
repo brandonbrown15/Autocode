@@ -41,6 +41,7 @@ Optional: big SSD (4TB). `./start` will try to use it automatically.
 
 | Do this | Command |
 |---------|---------|
+| Open the dashboard | `./scripts/ui.sh` → http://127.0.0.1:8787/ |
 | See if it is healthy | `./scripts/doctor.sh` |
 | See what it is doing | `./scripts/status.sh` |
 | Pause it | `./scripts/control.sh pause` |

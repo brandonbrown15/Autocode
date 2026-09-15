@@ -86,6 +86,12 @@ check_layout() {
     scripts/delegate_cursor.sh
     scripts/delegate_grok.sh
     docs/how-ai-talks.md
+    docs/ui.md
+    ui/server.py
+    ui/static/index.html
+    ui/static/app.css
+    ui/static/app.js
+    scripts/ui.sh
   )
   local missing=0
   for f in "${required[@]}"; do

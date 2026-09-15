@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Autocode</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <header class="top">
+    <div class="brand-block">
+      <p class="brand">Autocode</p>
+      <p class="tagline">Overnight coding on your machine — watch it, pause it, keep it honest.</p>
+    </div>
+    <div class="live-chip" id="liveChip" data-phase="idle">
+      <span class="pulse" aria-hidden="true"></span>
+      <span id="phaseLabel">idle</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-status" aria-labelledby="nowHeading">
+      <h1 id="nowHeading">What’s happening now</h1>
+      <p class="lede" id="statusLede">Loading status…</p>
+      <dl class="readout" id="readout">
+        <div><dt>Task</dt><dd id="taskVal">—</dd></div>
+        <div><dt>Route</dt><dd id="routeVal">—</dd></div>
+        <div><dt>Heartbeat</dt><dd id="hbVal">—</dd></div>
+        <div><dt>Stuck?</dt><dd id="stuckVal">—</dd></div>
+      </dl>
+      <div class="actions" role="group" aria-label="Night controls">
+        <button type="button" class="btn primary" data-action="pause">Pause</button>
+        <button type="button" class="btn" data-action="resume">Resume</button>
+        <button type="button" class="btn danger" data-action="abort">Abort night</button>
+        <button type="button" class="btn ghost" id="demoBtn">Run mock night</button>
+      </div>
+      <form class="skip-row" id="skipForm">
+        <label for="skipId">Skip task id</label>
+        <input id="skipId" name="task_id" placeholder="BLD-12" autocomplete="off" />
+        <button type="submit" class="btn compact">Skip</button>
+      </form>
+    </section>
+
+    <section class="ready" aria-labelledby="readyHeading">
+      <h2 id="readyHeading">Ready checklist</h2>
+      <p class="section-note">Green means this Jetson (or Linux box) can run a night. Fix reds with the hints.</p>
+      <ul class="checks" id="checks"></ul>
+      <p class="meta" id="readyMeta"></p>
+    </section>
+
+    <section class="logs" aria-labelledby="logHeading">
+      <div class="log-head">
+        <h2 id="logHeading">Latest log</h2>
+        <span class="path" id="logPath"></span>
+      </div>
+      <pre id="logText" class="log-pane" tabindex="0">(waiting…)</pre>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Local UI · binds to this machine only by default · <a href="https://github.com/brandonbrown15/Autocode">Autocode</a></p>
+    <p id="toast" class="toast" role="status" aria-live="polite"></p>
+  </footer>
+
+  <script>window.__AUTOCODE_TOKEN__ = "{{TOKEN}}";</script>
+  <script src="/app.js"></script>
+</body>
+</html>

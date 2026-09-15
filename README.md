@@ -19,12 +19,15 @@ Full kid-simple checklist: **[START_HERE.md](START_HERE.md)**
 ## After it is running
 
 ```bash
+./scripts/ui.sh              # open http://127.0.0.1:8787/ dashboard
 ./scripts/status.sh          # what is it doing?
 ./scripts/control.sh pause   # stop for a bit
 ./scripts/doctor.sh          # is anything broken?
 ```
 
 Add work in Notion → **Build Queue** → Status = **Ready**.
+
+Dashboard docs: **[docs/ui.md](docs/ui.md)**
 
 ## How the AIs talk
 
