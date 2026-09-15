@@ -59,7 +59,18 @@ Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/id
 | `hermes/` | Hermes config stubs |
 | `notion/` | REST helpers (token from env only) |
 | `cron/` | Overnight systemd timer |
-| `docs/` | Guardrails, Notion schema, security |
+| `orchestrator/` | Local-first router + cloud escalation |
+| `docs/` | Guardrails, Notion schema, security, routing |
+
+## Independent overnight loop
+
+```bash
+./cron/overnight_run.sh           # live
+./cron/overnight_run.sh --dry-run # route only
+# or: python3 orchestrator/run_night.py --dry-run
+```
+
+Local Hermes handles Local-safe work. When the task is Cloud-only, the Jetson is out of RAM, or local fails, Autocode **delegates** to Cursor Cloud / Claude / Grok (see [docs/routing.md](docs/routing.md)).
 
 ## Guardrails
 
