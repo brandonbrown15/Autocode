@@ -1,39 +1,29 @@
 # Autocode
 
-BrownHawke **Local Coding Machine** — always-on Jetson Orin Nano Super + [Hermes Agent](https://hermes-agent.ai) overnight coding autopilot.
+**Open-source overnight coding autopilot** for a local AI box (designed for [Jetson Orin Nano Super](https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-orin/), usable on other Linux + GPU hosts).
 
-Local models handle simple coding for free. Hard work escalates to Claude / Grok / Cursor Cloud. Progress is tracked in Notion (Build Queue → Agent Runs → Escalation Log).
+Runs [Hermes Agent](https://hermes-agent.ai) against a **local** Ollama coder, pulls work from **your** Notion Build Queue, opens PRs, and can send a morning Telegram digest. Hard tasks escalate. **Secrets never live in git.**
 
-Notion hub: [Local Coding Machine — Hermes Autopilot](https://app.notion.com/p/3dc9daf596d781d39a62cad3a994e4a4)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## North-star loop
+## Why Autocode
 
-```text
-Build Queue (Ready + Local-safe)
-  → overnight cron on Jetson
-  → Hermes + local Ollama coder-64k
-  → branch + tests + PR  |  Escalation Log if stuck
-  → morning Telegram digest
-  → you review / merge / re-queue
+- **Free local coding** for small, Local-safe tasks
+- **Overnight cron** so work moves while you sleep
+- **Bring your own** Notion + Telegram + repos (no vendor lock-in)
+- **Guardrails**: no direct `main` merges, budget caps, escalation log
+
+## Quick start
+
+```bash
+git clone https://github.com/brandonbrown15/Autocode.git
+cd Autocode
+./scripts/setup.sh          # creates local .env (gitignored)
+# edit .env — see docs/notion-setup.md
+./scripts/setup.sh --check  # verify layout + no secrets tracked
 ```
 
-## Repo layout
-
-| Path | Purpose |
-|------|---------|
-| `bootstrap/` | Jetson first-boot: JetPack checks, SSH, MAXN_SUPER, swap |
-| `ollama/` | CUDA Ollama install, `coder-64k` Modelfile, keep-alive |
-| `hermes/` | Hermes Agent config stubs (local primary + cloud fallbacks) |
-| `notion/` | Build Queue / Agent Runs / Escalation Log IDs + API helpers |
-| `cron/` | Overnight autopilot unit + digest timer |
-| `docs/` | Guardrails, Local-safe definition, Jetson notes |
-| `scripts/` | Thin wrappers invoked by cron / systemd |
-
-## Quick start (on the Jetson)
-
-1. Clone this repo onto the Orin Nano Super (NVMe recommended).
-2. Copy `.env.example` → `.env` and fill secrets locally (never commit).
-3. Run phases in order:
+### On the Jetson (or Linux aarch64/x86_64 host)
 
 ```bash
 ./bootstrap/00_check_jetson.sh
@@ -45,18 +35,49 @@ Build Queue (Ready + Local-safe)
 ./cron/install_autopilot_timers.sh
 ```
 
-4. Seed / confirm Ready + Local-safe tasks in Notion Build Queue.
-5. First overnight run: supervised (`docs/supervised-first-run.md`).
+First overnight run: stay nearby — [docs/supervised-first-run.md](docs/supervised-first-run.md).
 
-## Guardrails (non-negotiable)
+## What you configure (local only)
 
-- Never push or merge `main` directly.
-- Never invent or rotate secrets without a human.
-- Max **1–2** Ready tasks per night at first.
-- Max wall time per task (~45–90 min) and tool iterations (~40).
-- Prefer tiny reviewable PRs over unfinished hero branches.
-- Local first; paid models only on Cloud-only route, explicit Model route, or two local failures.
+| Variable | Purpose |
+|----------|---------|
+| `NOTION_TOKEN` + DB IDs | Your Build Queue / Agent Runs / Escalation Log |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional morning digest |
+| `WORKSPACE_REPOS` | Git repos Hermes may edit |
+| Paid API keys | Optional fallbacks — leave empty at first |
 
-## Status
+Templates: [`.env.example`](.env.example), [`notion/ids.example.yaml`](notion/ids.example.yaml).  
+**Never commit** `.env` or `notion/ids.yaml`.
 
-Scaffold for Build Queue **BLD-9**. Hardware install (Phases 0–2) and live cron wiring (Phase 3) land on the Jetson after this repo is cloned there.
+## Repo layout
+
+| Path | Purpose |
+|------|---------|
+| `scripts/setup.sh` | One-command local setup + hygiene check |
+| `bootstrap/` | Host checks + swap helper |
+| `ollama/` | Ollama install + `coder-64k` Modelfile |
+| `hermes/` | Hermes config stubs |
+| `notion/` | REST helpers (token from env only) |
+| `cron/` | Overnight systemd timer |
+| `docs/` | Guardrails, Notion schema, security |
+
+## Guardrails
+
+- Never push/merge `main` directly
+- Never invent or rotate secrets
+- Max 1–2 Ready tasks per night at first
+- Prefer tiny PRs; escalate after two local failures
+
+Details: [docs/guardrails.md](docs/guardrails.md) · [docs/security.md](docs/security.md)
+
+## Docs
+
+- [Notion setup](docs/notion-setup.md) — recreate databases in *your* workspace
+- [Architecture](docs/architecture.md)
+- [Jetson notes](docs/jetson.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+
+## License
+
+[MIT](LICENSE) — contributions welcome.

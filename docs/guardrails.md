@@ -5,7 +5,7 @@ Non-negotiable operating policy for Autocode on the Jetson.
 ## Git
 
 - Never push or merge `main` directly.
-- Branch: `hermes/<task-id>-short-slug` (e.g. `hermes/bld-7-rose-docs-typo`).
+- Branch: `hermes/<task-id>-short-slug` (e.g. `hermes/bld-7-docs-typo`).
 - Prefer tiny PRs over unfinished branches.
 
 ## Secrets
