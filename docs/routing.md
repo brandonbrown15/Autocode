@@ -31,7 +31,7 @@ If the target is **Human**, the Build Queue item is marked **Blocked**.
 |--------|------------------|
 | Cursor Cloud | `AUTOCODE_CURSOR_DELEGATE_CMD` or `CURSOR_API_KEY` present, or Model route |
 | Claude | `ANTHROPIC_API_KEY` |
-| Grok Bot | `OPENROUTER_API_KEY` / `XAI_API_KEY` |
+| Grok Bot | Notion **Model route = Grok**, or keys below (tried in order): `AUTOCODE_GROK_DELEGATE_CMD` → `XAI_API_KEY` (api.x.ai) → `OPENROUTER_API_KEY` |
 | Human | no cloud keys — digest asks you to pick it up |
 
 Set a Cursor handoff command, for example:
@@ -40,6 +40,25 @@ Set a Cursor handoff command, for example:
 # .env (local only)
 AUTOCODE_CURSOR_DELEGATE_CMD='./scripts/delegate_cursor_stub.sh'
 ```
+
+### Grok Bot
+
+Tried in order when a task escalates to **Grok Bot**:
+
+1. `AUTOCODE_GROK_DELEGATE_CMD` — your webhook / Telegram / custom bot
+2. `XAI_API_KEY` — direct [xAI API](https://api.x.ai/v1)
+3. `OPENROUTER_API_KEY` — OpenRouter model `x-ai/grok-2` (override with `AUTOCODE_OPENROUTER_MODEL`)
+
+```bash
+# Direct xAI
+XAI_API_KEY=xai-...
+AUTOCODE_GROK_MODEL=grok-2-latest
+
+# Or your own Grok Bot webhook
+AUTOCODE_GROK_DELEGATE_CMD='./scripts/delegate_grok_stub.sh'
+```
+
+In Notion, set **Model route = Grok** on a Build Queue row to force Grok Bot for that task.
 
 The stub reads `$AUTOCODE_DELEGATE_PAYLOAD` (JSON with acceptance criteria + context).
 

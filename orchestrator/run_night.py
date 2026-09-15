@@ -518,6 +518,31 @@ def openrouter_delegate(task: Task, context: str) -> str:
     return data["choices"][0]["message"]["content"][:2000]
 
 
+def xai_grok_delegate(task: Task, context: str) -> str:
+    """Direct xAI Grok API (https://api.x.ai/v1)."""
+    api_key = os.environ["XAI_API_KEY"]
+    model = os.environ.get("AUTOCODE_GROK_MODEL", "grok-2-latest")
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are Grok Bot receiving an Autocode escalation."},
+            {"role": "user", "content": cloud_coding_prompt(task, context)},
+        ],
+    }
+    req = urllib.request.Request(
+        "https://api.x.ai/v1/chat/completions",
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = json.loads(resp.read().decode())
+    return data["choices"][0]["message"]["content"][:2000]
+
+
 def model_label_for_target(target: str) -> str:
     return {
         "Claude": "Claude",
@@ -580,13 +605,49 @@ def invoke_cloud_delegate(
         except Exception as e:  # noqa: BLE001
             context = f"{context}\nClaude delegate failed: {e}"
 
+    # Custom Grok Bot webhook / Telegram / xAI agent launcher
+    grok_cmd = os.environ.get("AUTOCODE_GROK_DELEGATE_CMD", "").strip()
+    if target == "Grok Bot" and grok_cmd:
+        try:
+            subprocess.run(
+                grok_cmd,
+                shell=True,
+                check=True,
+                cwd=str(ROOT),
+                env={**os.environ, "AUTOCODE_DELEGATE_PAYLOAD": str(payload_path)},
+                timeout=env_int("AUTOCODE_DELEGATE_TIMEOUT_SEC", 120),
+            )
+            return RunResult(
+                outcome="Escalated",
+                summary=f"Delegated to Grok Bot via AUTOCODE_GROK_DELEGATE_CMD; {payload_path}",
+                model_used="Grok",
+                escalated_to=target,
+                why=why,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            context = f"{context}\nGrok delegate cmd failed: {e}"
+
+    if target == "Grok Bot" and os.environ.get("XAI_API_KEY"):
+        try:
+            reply = xai_grok_delegate(task, context)
+            (ROOT / "state" / f"grok-{task.task_id}.txt").write_text(reply)
+            return RunResult(
+                outcome="Escalated",
+                summary=f"Delegated to xAI Grok; payload {payload_path}; reply_len={len(reply)}",
+                model_used="Grok",
+                escalated_to=target,
+                why=why,
+            )
+        except Exception as e:  # noqa: BLE001
+            context = f"{context}\nxAI Grok delegate failed: {e}"
+
     if target == "Grok Bot" and os.environ.get("OPENROUTER_API_KEY"):
         try:
             reply = openrouter_delegate(task, context)
             (ROOT / "state" / f"grok-{task.task_id}.txt").write_text(reply)
             return RunResult(
                 outcome="Escalated",
-                summary=f"Delegated via OpenRouter; payload {payload_path}; reply_len={len(reply)}",
+                summary=f"Delegated to Grok via OpenRouter; payload {payload_path}; reply_len={len(reply)}",
                 model_used="Grok",
                 escalated_to=target,
                 why=why,
