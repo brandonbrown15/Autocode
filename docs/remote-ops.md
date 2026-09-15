@@ -1,16 +1,16 @@
 # Remote monitoring & intervention
 
-**Short answer:** Autocode is not plug-and-play on a fresh Jetson yet (see [go-live.md](go-live.md)). Once a night is running, you *can* watch and intervene remotely.
+**Short answer:** Once Autocode is live on the Jetson, you can watch it, pause it, and **talk to the model** from your phone — not only overnight.
 
-## How to watch (cloud + SSH)
+## How to watch
 
-| Channel | What you see | Setup |
+| Channel | What you get | Setup |
 |---------|--------------|--------|
-| **Notion** | Build Queue status, Agent Runs, Escalation Log | Required for live nights |
-| **Telegram** | Night start / per-task route / pause-abort / digest | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
-| **Tailscale SSH** | Live heartbeat, logs, pause/abort/skip | Install Tailscale on Jetson + phone/laptop |
+| **Notion** | Build Queue, Agent Runs, Escalation Log | Required for live autopilot |
+| **Telegram** | Cycle start / per-task route / pause-abort / digest | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
+| **Tailscale + UI** | Live dashboard, controls, **LLM chat** | Install Tailscale; `./scripts/ui.sh --remote` |
 
-Recommended: **Tailscale** on the Jetson (always-on SSH + dashboard from your phone). Notion is the task board; Telegram is the pager; **`./scripts/ui.sh --remote`** is the live control panel ([ui.md](ui.md)). Continuous daytime coding is documented in [continuous.md](continuous.md).
+Recommended path: **Tailscale** on the Jetson. Notion is the task board; Telegram is the pager; the UI is the live control panel ([ui.md](ui.md)). Always-on coding: [continuous.md](continuous.md).
 
 ```bash
 # On Jetson (one-time)
@@ -27,8 +27,18 @@ cd /opt/autocode   # or your clone path
 # or tunnel from your laptop:
 #   ssh -L 8787:127.0.0.1:8787 jetson
 ./scripts/status.sh
-tail -f logs/nightly-*.log logs/worker-*.log
+tail -f logs/worker-*.log logs/nightly-*.log
 ```
+
+## Give the model instructions remotely
+
+Open the Tailscale UI URL on your phone/laptop → **Talk to Autocode**.
+
+- Messages hit the **local** Ollama model on the Jetson first
+- Hard asks auto-escalate to a larger cloud model (Claude / OpenRouter / Grok)
+- You can optionally add follow-ups to the Notion Ready checklist from chat
+
+Same feature as sitting at the machine — remote access uses the identical UI.
 
 ## Always-on coding (not just overnight)
 
@@ -36,63 +46,46 @@ tail -f logs/nightly-*.log logs/worker-*.log
 # in .env after a supervised run
 AUTOCODE_AUTOPILOT_ENABLED=1
 AUTOCODE_CONTINUOUS_ENABLED=1
+AUTOCODE_DRAIN_UNTIL_EMPTY=1
 
 ./cron/install_autopilot_timers.sh
 # overnight @ 01:00 + worker every ~30 min + UI service
 ```
 
-Details: [continuous.md](continuous.md)
+## Pause / abort / skip remotely
 
-## Live status
-
-```bash
-./scripts/status.sh
-# or
-python3 -m orchestrator.ops status
-```
-
-Writes/reads `state/status.json`:
-
-- `phase` — idle / starting / routing / running_local / escalating / paused / done / aborted  
-- `task_id` / `route` / `detail`  
-- `heartbeat_at` — if older than `AUTOCODE_STUCK_SECONDS` (default 900) while running → **stuck?**
-
-## Intervene
+From the UI, Telegram, or SSH:
 
 ```bash
-./scripts/control.sh pause --note "checking PR"
+./scripts/control.sh pause
 ./scripts/control.sh resume
-./scripts/control.sh skip BLD-12          # skip when loop reaches it
-./scripts/control.sh abort                # stop after current step
-./scripts/control.sh clear
-./scripts/control.sh ping                 # test Telegram
+./scripts/control.sh abort
+./scripts/control.sh skip BLD-12
 ```
 
-Pause blocks **between** tasks (and while waiting). Abort finishes the current step then stops the night.
+Pause blocks **between** tasks. Abort finishes the current step then stops the cycle.
 
-## Telegram progress
+## Telegram
 
-With tokens set, Autocode pings on:
+When configured, Autocode can ping:
 
-- night start / finish  
-- each task route  
-- pause / resume / abort / skip  
-- morning digest (existing)
+- cycle start / finish  
+- per-task route  
+- pause / abort  
 
 Disable chatter: `AUTOCODE_TELEGRAM_PROGRESS=0`
 
-## Stuck / not working
+## If something looks stuck
 
-1. `./scripts/status.sh` — is heartbeat fresh? `stuck?: YES`?  
-2. `tail -f logs/nightly-*.log` — Hermes hung? Ollama down?  
-3. `./scripts/control.sh pause` then SSH in and inspect the branch/repo  
-4. Notion Escalation Log — did it escalate to Cursor/Grok/Human?  
-5. If local is thrashing: `./scripts/control.sh abort`, mark the Notion row Blocked / re-route Model route to Cursor Cloud
+1. Check UI stuck indicator / heartbeat age  
+2. `tail -f logs/worker-*.log` — Hermes hung? Ollama down?  
+3. `./scripts/doctor.sh`  
+4. Pause, fix, resume — or abort and re-queue in Notion  
 
-## Honest “can I start tonight?”
+## Honest readiness
 
-| Mode | Ready now? |
-|------|------------|
+| Goal | Ready? |
+|------|--------|
 | `./scripts/demo_night.sh` (mock) | Yes — no Jetson AI / Notion needed |
-| Live overnight coding | **Not yet** until go-live checklist (Hermes, Notion, real Cursor/Grok delegates) |
-| Remote monitor once live | Yes — this doc + Tailscale + Telegram + Notion |
+| Live always-on coding | After go-live checklist (Hermes, Notion, optional cloud keys) |
+| Remote monitor + chat once live | Yes — this doc + Tailscale + UI |

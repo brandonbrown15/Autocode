@@ -21,9 +21,12 @@ systemctl --user enable --now autocode-ui.service   # after install rewrites pat
 - Live phase / task / route / heartbeat (same as `./scripts/status.sh`)
 - Pause · Resume · Abort · Skip task
 - Ready checklist (Notion, Hermes, Ollama, GitHub, autopilot / continuous)
-- **Run work cycle** — pick the next Ready Notion task now
-- Mock night for dry practice
+- **Run work cycle** — drain Ready Notion tasks now
+- **Talk to Autocode** — chat with the local LLM; auto-escalates to a larger cloud model when needed
+- Mock cycle for dry practice
 - Tail of the latest log
+
+The same dashboard works over Tailscale remote access — chat, controls, and status are identical on phone or laptop.
 
 ## Remote monitoring (phone / laptop)
 
@@ -82,7 +85,11 @@ Mutating actions require a session token injected into the page (CSRF guard).
 
 ## Talk to Autocode
 
-The dashboard includes a chat box that talks to the **local** Ollama model first.
-If the request is too hard (or the local model says `ESCALATE:`), Autocode forwards it
-to Claude / OpenRouter / Grok when those keys are set. Useful instructions can be
-seeded straight into the Notion Ready checklist.
+The dashboard chat box talks to the **local** Ollama model first (on the Jetson).
+
+1. You type an instruction (locally or from your phone over Tailscale).
+2. Local model answers when it can.
+3. If it cannot (says `ESCALATE:`, errors, or the ask is clearly too big), Autocode forwards the request to Claude / OpenRouter / Grok when those keys are set.
+4. Optional checkbox: seed useful follow-ups into the Notion Ready checklist.
+
+Cloud keys (optional): `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `XAI_API_KEY`.
