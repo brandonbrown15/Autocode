@@ -1,3 +1,3 @@
-"""Autocode local web UI — kid-simple control panel."""
+"""Autocode local web UI."""
 
 __all__ = ["server"]

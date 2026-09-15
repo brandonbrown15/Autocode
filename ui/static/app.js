@@ -66,10 +66,13 @@
 
   function renderStatus(snap) {
     const st = snap.status || {};
-    const phase = st.phase || "idle";
-    const chip = document.getElementById("liveChip");
-    chip.dataset.phase = phase;
-    document.getElementById("phaseLabel").textContent = phase;
+    const ctl = snap.control || {};
+    let phase = st.phase || "idle";
+    let label = phase;
+    if (ctl.abort) { phase = "aborted"; label = "aborting"; }
+    else if (ctl.paused) { phase = "paused"; label = "paused"; }
+    document.getElementById("liveChip").dataset.phase = phase;
+    document.getElementById("phaseLabel").textContent = label;
     document.getElementById("statusLede").textContent = phaseSentence(snap);
     document.getElementById("taskVal").textContent =
       [st.task_id, st.task_name].filter(Boolean).join(" — ") || "—";
@@ -90,15 +93,16 @@
       label.textContent = c.label;
       const hint = document.createElement("span");
       hint.className = "hint";
-      hint.textContent = c.ok ? "" : c.hint || "";
+      hint.textContent = c.ok ? "" : (c.hint || "");
       li.append(badge, label, hint);
       ul.appendChild(li);
     }
-    const bits = [];
-    bits.push(data.ready ? "Core stack looks ready" : "Finish the red checklist items");
-    bits.push(`profile=${data.cost_profile || "?"}`);
-    bits.push(data.local_only ? "local-only" : "cloud escalate on");
-    bits.push(data.autopilot ? "autopilot ON" : "autopilot off");
+    const bits = [
+      data.ready ? "Core stack looks ready" : "Finish the red checklist items",
+      `profile=${data.cost_profile || "?"}`,
+      data.local_only ? "local-only" : "cloud escalate on",
+      data.autopilot ? "autopilot ON" : "autopilot off",
+    ];
     document.getElementById("readyMeta").textContent = bits.join(" · ");
   }
 
@@ -165,7 +169,5 @@
   });
 
   refresh().catch((e) => toast(String(e.message || e)));
-  setInterval(() => {
-    refresh().catch(() => {});
-  }, 2500);
+  setInterval(() => { refresh().catch(() => {}); }, 2500);
 })();

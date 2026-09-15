@@ -4,8 +4,8 @@
   python3 -m ui.server
   ./scripts/ui.sh
 
-Default bind: 127.0.0.1:8787 (safe for Jetson + Tailscale SSH tunnel).
-Set AUTOCODE_UI_HOST=0.0.0.0 only if you intentionally expose on LAN.
+Default: 127.0.0.1:8787
+Tunnel: ssh -L 8787:127.0.0.1:8787 jetson
 """
 
 from __future__ import annotations
@@ -35,43 +35,50 @@ LOGS = ROOT / "logs"
 
 HOST = os.environ.get("AUTOCODE_UI_HOST", "127.0.0.1")
 PORT = int(os.environ.get("AUTOCODE_UI_PORT", "8787"))
-SESSION_TOKEN = secrets.token_urlsafe(24)
+TOKEN = secrets.token_urlsafe(24)
 
 _demo_lock = threading.Lock()
 _demo_proc: subprocess.Popen[str] | None = None
 _demo_log = STATE / "ui-demo.log"
 
 
-def _load_dotenv() -> None:
-    env_path = ROOT / ".env"
-    if not env_path.exists():
+def load_dotenv() -> None:
+    path = ROOT / ".env"
+    if not path.exists():
         return
-    for line in env_path.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
+        key, val = key.strip(), val.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = val
 
 
-def _json(data: Any, code: int = 200) -> tuple[int, bytes, str]:
-    body = json.dumps(data, indent=2).encode()
-    return code, body, "application/json; charset=utf-8"
+def json_response(data: Any, code: int = 200) -> tuple[int, bytes, str]:
+    return code, json.dumps(data, indent=2).encode(), "application/json; charset=utf-8"
 
 
-def _env_truthy(name: str, default: str = "0") -> bool:
+def env_truthy(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).lower() in ("1", "true", "yes", "on")
 
 
-def _has(name: str) -> bool:
+def has_env(name: str) -> bool:
     return bool(os.environ.get(name, "").strip())
 
 
+def gh_authed() -> bool:
+    try:
+        r = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=8, cwd=ROOT
+        )
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
 def readiness() -> dict[str, Any]:
-    """Non-secret readiness for the UI checklist."""
     hermes_ok = False
     ollama_ok = False
     model = os.environ.get("OLLAMA_MODEL", "coder-64k")
@@ -80,99 +87,93 @@ def readiness() -> dict[str, Any]:
         hermes_ok = report.hermes_ok
         ollama_ok = report.ollama_ok
         model = report.ollama_model
+        details = list(report.details)
     except Exception as e:  # noqa: BLE001
         details = [f"health check error: {e}"]
-    else:
-        details = list(report.details)
 
     cursor_cmd = os.environ.get("AUTOCODE_CURSOR_DELEGATE_CMD", "")
     grok_cmd = os.environ.get("AUTOCODE_GROK_DELEGATE_CMD", "")
-    local_only = _env_truthy("AUTOCODE_LOCAL_ONLY", "1")
+    local_only = env_truthy("AUTOCODE_LOCAL_ONLY", "1")
 
     checks = [
         {"id": "env", "label": ".env present", "ok": (ROOT / ".env").exists(), "hint": "Run ./start"},
-        {"id": "notion", "label": "Notion connected", "ok": _has("NOTION_TOKEN"), "hint": "./scripts/connect_notion.sh"},
-        {"id": "hub", "label": "Notion hub / DBs", "ok": _has("NOTION_BUILD_QUEUE_DB") or _has("NOTION_HUB_PAGE"), "hint": "Share Autocode Hub page"},
-        {"id": "github", "label": "GitHub token", "ok": _has("GITHUB_TOKEN") or _gh_authed(), "hint": "./scripts/auth_github.sh"},
+        {"id": "notion", "label": "Notion connected", "ok": has_env("NOTION_TOKEN"), "hint": "./scripts/connect_notion.sh"},
+        {
+            "id": "hub",
+            "label": "Notion hub / DBs",
+            "ok": has_env("NOTION_BUILD_QUEUE_DB") or has_env("NOTION_HUB_PAGE"),
+            "hint": "Share Autocode Hub page",
+        },
+        {
+            "id": "github",
+            "label": "GitHub token",
+            "ok": has_env("GITHUB_TOKEN") or gh_authed(),
+            "hint": "./scripts/auth_github.sh",
+        },
         {"id": "hermes", "label": "Hermes CLI", "ok": hermes_ok, "hint": "./hermes/install_hermes.sh"},
         {"id": "ollama", "label": f"Ollama ({model})", "ok": ollama_ok, "hint": "./ollama/install_ollama_jetson.sh"},
         {
             "id": "cursor",
             "label": "Cursor webhook",
-            "ok": local_only or (_has("CURSOR_WEBHOOK_URL") and "stub" not in cursor_cmd),
+            "ok": local_only or (has_env("CURSOR_WEBHOOK_URL") and "stub" not in cursor_cmd),
             "hint": "Set CURSOR_WEBHOOK_URL (or keep LOCAL_ONLY=1)",
             "optional": True,
         },
         {
             "id": "grok",
             "label": "Grok Bot webhook",
-            "ok": local_only or (_has("GROK_BOT_WEBHOOK_URL") and "stub" not in grok_cmd),
+            "ok": local_only or (has_env("GROK_BOT_WEBHOOK_URL") and "stub" not in grok_cmd),
             "hint": "Set GROK_BOT_WEBHOOK_URL (or keep LOCAL_ONLY=1)",
             "optional": True,
         },
         {
             "id": "autopilot",
             "label": "Autopilot enabled",
-            "ok": _env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
+            "ok": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
             "hint": "Set AUTOCODE_AUTOPILOT_ENABLED=1 after a supervised night",
             "optional": True,
         },
     ]
-    required_ok = all(c["ok"] for c in checks if not c.get("optional"))
     return {
-        "ready": required_ok,
+        "ready": all(c["ok"] for c in checks if not c.get("optional")),
         "local_only": local_only,
-        "autopilot": _env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
+        "autopilot": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
         "checks": checks,
         "details": details,
         "cost_profile": os.environ.get("AUTOCODE_COST_PROFILE", "cursor-grok"),
     }
 
 
-def _gh_authed() -> bool:
-    try:
-        r = subprocess.run(
-            ["gh", "auth", "status"],
-            capture_output=True,
-            text=True,
-            timeout=8,
-            cwd=ROOT,
-        )
-        return r.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
-
-
 def snapshot() -> dict[str, Any]:
     status = ops.load_status()
     control = ops.load_control()
-    age = status.age_seconds()
     return {
         "status": asdict(status),
         "control": asdict(control),
-        "heartbeat_age_sec": age,
+        "heartbeat_age_sec": status.age_seconds(),
         "stuck": status.looks_stuck(),
         "formatted": ops.format_status(status, control),
-        "token": SESSION_TOKEN,
+        "token": TOKEN,
     }
 
 
 def latest_log_tail(n: int = 80) -> dict[str, Any]:
     candidates: list[Path] = []
     if LOGS.is_dir():
-        candidates.extend(sorted(LOGS.glob("nightly-*.log"), key=lambda p: p.stat().st_mtime))
-        candidates.extend(sorted(LOGS.glob("*.log"), key=lambda p: p.stat().st_mtime))
+        candidates.extend(LOGS.glob("nightly-*.log"))
+        candidates.extend(LOGS.glob("*.log"))
     if _demo_log.exists():
         candidates.append(_demo_log)
     if not candidates:
-        return {"path": None, "lines": [], "text": "(no logs yet — run a demo night)"}
+        return {"path": None, "lines": [], "text": "(no logs yet — run a mock night)"}
     path = max(candidates, key=lambda p: p.stat().st_mtime)
     try:
         text = path.read_text(errors="replace")
     except OSError as e:
         return {"path": str(path), "lines": [], "text": f"(unreadable: {e})"}
     lines = text.splitlines()[-n:]
-    return {"path": str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path), "lines": lines, "text": "\n".join(lines)}
+    rel = str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path)
+    return {"path": rel, "lines": lines, "text": "\n".join(lines)}
 
 
 def demo_state() -> dict[str, Any]:
@@ -194,16 +195,19 @@ def start_demo() -> dict[str, Any]:
         STATE.mkdir(parents=True, exist_ok=True)
         logf = _demo_log.open("w")
         script = ROOT / "scripts" / "demo_night.sh"
-        cmd = [str(script)] if script.exists() else [sys.executable, "-m", "orchestrator.run_night", "--mock"]
-        _demo_proc = subprocess.Popen(
-            cmd,
-            cwd=ROOT,
-            stdout=logf,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env={**os.environ},
+        cmd = (
+            [str(script)]
+            if script.exists()
+            else [sys.executable, "-m", "orchestrator.run_night", "--mock"]
         )
-        ops.write_status(phase="starting", detail="UI started mock demo night", night_id=f"ui-demo-{int(time.time())}")
+        _demo_proc = subprocess.Popen(
+            cmd, cwd=ROOT, stdout=logf, stderr=subprocess.STDOUT, text=True, env={**os.environ}
+        )
+        ops.write_status(
+            phase="starting",
+            detail="UI started mock demo night",
+            night_id=f"ui-demo-{int(time.time())}",
+        )
         ops.telegram_notify("Autocode UI: mock demo night started")
     return {"ok": True, **demo_state()}
 
@@ -240,14 +244,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write(f"[ui] {self.address_string()} {fmt % args}\n")
 
-    def _cors(self) -> None:
-        self.send_header("Cache-Control", "no-store")
-
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self._cors()
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -255,74 +256,71 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0:
             return {}
-        raw = self.rfile.read(length)
         try:
-            data = json.loads(raw.decode() or "{}")
+            data = json.loads(self.rfile.read(length).decode() or "{}")
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError:
             return {}
 
-    def _check_token(self, data: dict[str, Any] | None = None) -> bool:
+    def _ok_token(self, data: dict[str, Any] | None = None) -> bool:
         hdr = self.headers.get("X-Autocode-Token", "")
         tok = hdr or (data or {}).get("token") or ""
-        return secrets.compare_digest(str(tok), SESSION_TOKEN)
+        return secrets.compare_digest(str(tok), TOKEN)
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
-            return self._serve_static("index.html", "text/html; charset=utf-8")
+            return self._static("index.html", "text/html; charset=utf-8")
         if path == "/app.css":
-            return self._serve_static("app.css", "text/css; charset=utf-8")
+            return self._static("app.css", "text/css; charset=utf-8")
         if path == "/app.js":
-            return self._serve_static("app.js", "application/javascript; charset=utf-8")
+            return self._static("app.js", "application/javascript; charset=utf-8")
         if path == "/api/status":
-            return self._send(*_json(snapshot()))
+            return self._send(*json_response(snapshot()))
         if path == "/api/ready":
-            return self._send(*_json(readiness()))
+            return self._send(*json_response(readiness()))
         if path == "/api/logs":
-            return self._send(*_json(latest_log_tail()))
+            return self._send(*json_response(latest_log_tail()))
         if path == "/api/demo":
-            return self._send(*_json(demo_state()))
+            return self._send(*json_response(demo_state()))
         if path == "/api/token":
-            # Localhost-only convenience: page bootstraps CSRF token
-            return self._send(*_json({"token": SESSION_TOKEN}))
-        self._send(*_json({"error": "not found"}, 404))
+            return self._send(*json_response({"token": TOKEN}))
+        self._send(*json_response({"error": "not found"}, 404))
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         data = self._read_json()
-        if not self._check_token(data):
-            return self._send(*_json({"ok": False, "error": "bad token"}, 403))
+        if not self._ok_token(data):
+            return self._send(*json_response({"ok": False, "error": "bad token"}, 403))
         if path == "/api/control":
-            action = str(data.get("action") or "")
-            note = str(data.get("note") or "")
-            task_id = str(data.get("task_id") or "")
-            return self._send(*_json(apply_control(action, note, task_id)))
+            return self._send(
+                *json_response(
+                    apply_control(
+                        str(data.get("action") or ""),
+                        str(data.get("note") or ""),
+                        str(data.get("task_id") or ""),
+                    )
+                )
+            )
         if path == "/api/demo":
-            return self._send(*_json(start_demo()))
-        self._send(*_json({"ok": False, "error": "not found"}, 404))
+            return self._send(*json_response(start_demo()))
+        self._send(*json_response({"ok": False, "error": "not found"}, 404))
 
-    def _serve_static(self, name: str, content_type: str) -> None:
+    def _static(self, name: str, content_type: str) -> None:
         path = STATIC / name
-        if not path.exists() or not path.is_file():
-            return self._send(*_json({"error": f"missing {name}"}, 404))
-        # Prevent path escape
-        if not path.resolve().is_relative_to(STATIC.resolve()):
-            return self._send(*_json({"error": "forbidden"}, 403))
+        if not path.is_file() or not path.resolve().is_relative_to(STATIC.resolve()):
+            return self._send(*json_response({"error": f"missing {name}"}, 404))
         body = path.read_bytes()
-        # Inject token placeholder for HTML
         if name == "index.html":
-            html = body.decode("utf-8").replace("{{TOKEN}}", SESSION_TOKEN)
-            body = html.encode("utf-8")
+            body = body.decode("utf-8").replace("{{TOKEN}}", TOKEN).encode("utf-8")
         self._send(200, body, content_type)
 
 
 def main() -> None:
-    _load_dotenv()
+    load_dotenv()
     STATE.mkdir(parents=True, exist_ok=True)
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    url = f"http://{HOST}:{PORT}/"
-    print(f"Autocode UI → {url}")
+    print(f"Autocode UI → http://{HOST}:{PORT}/")
     print("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()

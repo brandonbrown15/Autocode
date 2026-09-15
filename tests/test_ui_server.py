@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 import threading
@@ -99,7 +98,6 @@ class UiHelpersTests(unittest.TestCase):
             self.assertTrue(out["ok"])
             self.assertTrue(ops.load_control().paused)
 
-            # Bad token rejected
             bad = request.Request(
                 f"http://127.0.0.1:{port}/api/control",
                 data=json.dumps({"action": "resume", "token": "nope"}).encode(),
