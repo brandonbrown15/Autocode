@@ -10,7 +10,11 @@
   }
 
   async function get(path) {
-    const r = await fetch(path, { headers: { Accept: "application/json" } });
+    const r = await fetch(path, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+    if (r.status === 401) {
+      location.href = "/login";
+      throw new Error("login required");
+    }
     if (!r.ok) throw new Error(`${path} → ${r.status}`);
     return r.json();
   }
@@ -18,6 +22,7 @@
   async function post(path, body) {
     const r = await fetch(path, {
       method: "POST",
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -25,6 +30,10 @@
       },
       body: JSON.stringify({ ...body, token }),
     });
+    if (r.status === 401) {
+      location.href = "/login";
+      throw new Error("login required");
+    }
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.ok === false) throw new Error(data.error || `${path} → ${r.status}`);
     return data;
@@ -99,12 +108,25 @@
     }
     const bits = [
       data.ready ? "Core stack looks ready" : "Finish the red checklist items",
+      `product=${data.product || "Hawkeye"}`,
       `profile=${data.cost_profile || "?"}`,
-      data.local_only ? "local-only" : "cloud escalate on",
+      data.personal_local_only
+        ? "local-only (escalate off)"
+        : data.local_only
+          ? "local-first (task cloud off)"
+          : "local-first → Cursor/Grok",
+      data.private_mode ? "login ON" : null,
       data.autopilot ? "autopilot ON" : "autopilot off",
       data.continuous ? "continuous ON" : "continuous off",
-    ];
+    ].filter(Boolean);
     document.getElementById("readyMeta").textContent = bits.join(" · ");
+
+    const chatNote = document.getElementById("chatNote");
+    if (chatNote && data.private_mode && !data.personal_local_only) {
+      const host = data.public_host || "hawkeye.brownhawke.engineering";
+      chatNote.textContent =
+        `${data.product || "Hawkeye"} @ ${host}: free local LLM all day; Cursor & Grok Bot take strenuous asks.`;
+    }
   }
 
   function renderLogs(data) {
@@ -219,9 +241,10 @@
           seed_notion: !!(seed && seed.checked),
         });
         if (data.local_reply) appendChat("local", data.local_reply);
-        if (data.escalated && data.cloud_reply) appendChat("cloud", data.cloud_reply);
+        if (data.escalated && data.cloud_reply) appendChat("cloud", `[${data.provider || "cloud"}] ${data.cloud_reply}`);
         if (data.seeded_task) appendChat("system", `Added to Notion checklist: ${data.seeded_task}`);
-        toast(data.escalated ? "Escalated to larger model" : "Local model replied");
+        if (data.local_only) toast("Local model replied (escalate disabled)");
+        else toast(data.escalated ? `Escalated to ${data.provider || "premium"}` : "Local model replied");
       } catch (e) {
         appendChat("system", String(e.message || e));
         toast(String(e.message || e));
@@ -233,4 +256,24 @@
 
   refresh().catch((e) => toast(String(e.message || e)));
   setInterval(() => { refresh().catch(() => {}); }, 2500);
+
+  get("/api/auth")
+    .then((auth) => {
+      const btn = document.getElementById("logoutBtn");
+      if (btn && auth.private_mode) {
+        btn.hidden = false;
+        btn.addEventListener("click", async () => {
+          try {
+            await fetch("/api/logout", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "X-Autocode-Token": token },
+              body: JSON.stringify({ token }),
+            });
+          } catch (_) { /* still leave */ }
+          location.href = "/login";
+        });
+      }
+    })
+    .catch(() => {});
 })();

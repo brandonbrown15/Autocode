@@ -61,16 +61,22 @@ ssh -L 8787:127.0.0.1:8787 jetson
 # open http://127.0.0.1:8787/ on your laptop
 ```
 
-### Option C — Public internet (optional)
+### Option C — Public domain (Hawkeye private)
 
-Only if you need access outside Tailscale. Prefer a **Cloudflare Tunnel** (or similar) in front of localhost:8787 rather than opening a raw port. The UI CSRF token is not a full auth system.
+Canonical host: **`https://hawkeye.brownhawke.engineering`** (subdomain of BrownHawke.engineering).  
+Use login + Cloudflare Tunnel. See **[hawkeye.md](hawkeye.md)**.
 
 ```bash
-# Example sketch — install cloudflared, then:
-cloudflared tunnel --url http://127.0.0.1:8787
+AUTOCODE_PRIVATE_MODE=1
+AUTOCODE_PRODUCT_NAME=Hawkeye
+AUTOCODE_PUBLIC_HOST=hawkeye.brownhawke.engineering
+AUTOCODE_UI_SECURE=1
+# password hash from: python3 scripts/set_private_password.py
+AUTOCODE_PERSONAL_LOCAL_ONLY=0   # keep Cursor/Grok escalate
+cloudflared tunnel route dns hawkeye hawkeye.brownhawke.engineering
 ```
 
-Do **not** bind `0.0.0.0` on a public IP without a tunnel + access policy.
+Do **not** bind `0.0.0.0` on a public IP without a tunnel + login.
 
 ## Env
 
@@ -79,17 +85,21 @@ Do **not** bind `0.0.0.0` on a public IP without a tunnel + access policy.
 | `AUTOCODE_UI_HOST` | `127.0.0.1` | Bind address |
 | `AUTOCODE_UI_PORT` | `8787` | Port |
 | `AUTOCODE_UI_REMOTE` | `0` | `1` = prefer Tailscale IP / LAN bind |
+| `AUTOCODE_PUBLIC_HOST` | `hawkeye.brownhawke.engineering` | Hawkeye public hostname |
+| `AUTOCODE_UI_SECURE` | `0` | Force Secure session cookies |
 
 Mutating actions require a session token injected into the page (CSRF guard).
 
 
-## Talk to Autocode
+## Talk to Hawkeye / Autocode
 
-The dashboard chat box talks to the **local** Ollama model first (on the Jetson).
+The dashboard chat box talks to the **local** Ollama model first (free all day on the Jetson).
 
-1. You type an instruction (locally or from your phone over Tailscale).
+1. You type an instruction (locally, Tailscale, or private domain after login).
 2. Local model answers when it can.
-3. If it cannot (says `ESCALATE:`, errors, or the ask is clearly too big), Autocode forwards the request to Claude / OpenRouter / Grok when those keys are set.
+3. If it cannot (says `ESCALATE:`, errors, or the ask is clearly too big), Hawkeye/Autocode forwards to **Cursor webhook → Grok Bot webhook**, then optional API keys.
 4. Optional checkbox: seed useful follow-ups into the Notion Ready checklist.
 
-Cloud keys (optional): `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `XAI_API_KEY`.
+Set `CURSOR_WEBHOOK_URL` and `GROK_BOT_WEBHOOK_URL` for premium handoff. Optional API keys: `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `XAI_API_KEY`.
+
+Private personal product: **[hawkeye.md](hawkeye.md)**.

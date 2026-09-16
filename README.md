@@ -1,48 +1,36 @@
-# Autocode
+# Hawkeye
 
-Always-on coding autopilot for a Jetson (or any Linux + GPU box).
+**Private** personal coding autopilot for BrownHawke — local Jetson LLM for free all-day use, with **Cursor** and **Grok Bot** taking over when a task is too hard. Login-gated UI on your own domain.
 
-It reads tasks from **your** Notion project, keeps coding without waiting for you, opens GitHub PRs, runs routine health/bug checks, and can enqueue follow-up checklist items when it spots improvements — until the project is finished.
+This is **not** the open-source Autocode repo. Autocode stays public; Hawkeye is your private fork.
 
-## Setup (this easy)
+Upstream (Apache-2.0, keep credit): [brandonbrown15/Autocode](https://github.com/brandonbrown15/Autocode)
+
+## What you get
+
+| Layer | Behavior |
+|-------|----------|
+| **Local Ollama** | Free all-day phone/laptop chat + easy Notion tasks |
+| **Cursor / Grok Bot** | Escalate strenuous work (webhooks) |
+| **Login** | Username/password session on the UI |
+| **Domain** | Cloudflare Tunnel → `https://hawkeye.brownhawke.engineering` → Jetson UI |
+
+## Setup
 
 ```bash
-git clone https://github.com/brandonbrown15/Autocode.git
-cd Autocode
+git clone https://github.com/brandonbrown15/Hawkeye.git
+cd Hawkeye
 ./start
+python3 scripts/set_private_password.py   # paste hash into .env
+# set CURSOR_WEBHOOK_URL + GROK_BOT_WEBHOOK_URL in .env
+./scripts/ui.sh
+# Cloudflare Tunnel → https://hawkeye.brownhawke.engineering
 ```
 
-`./start` asks a few questions, then installs everything.
-
-Full kid-simple checklist: **[START_HERE.md](START_HERE.md)**
-
-## After it is running
-
-```bash
-./scripts/ui.sh              # dashboard http://127.0.0.1:8787/
-./scripts/ui.sh --remote     # phone/laptop via Tailscale
-./scripts/status.sh          # what is it doing?
-./scripts/control.sh pause   # stop for a bit
-./scripts/doctor.sh          # is anything broken?
-```
-
-Add work in Notion → **Build Queue** → Status = **Ready**.
-
-Always-on coding: **[docs/continuous.md](docs/continuous.md)** · Dashboard: **[docs/ui.md](docs/ui.md)** · Remote: **[docs/remote-ops.md](docs/remote-ops.md)**
-
-## How the AIs talk
-
-Hermes only talks to **local Ollama**.  
-The always-on orchestrator decides when to call Cursor / Grok / a human.  
-→ [docs/how-ai-talks.md](docs/how-ai-talks.md)
-
-## Optional later
-
-- Notion browser sign-in: `./scripts/connect_notion.sh`
-- Cursor / Grok webhooks → [docs/go-live.md](docs/go-live.md)
-- Phone remote control → [docs/remote-ops.md](docs/remote-ops.md)
-- Jetson + 4TB SSD → [docs/jetson.md](docs/jetson.md)
+Full personal deploy (domain + login + escalate): **[docs/hawkeye.md](docs/hawkeye.md)**
 
 ## License
 
-[Apache-2.0](LICENSE) — free to use; please keep BrownHawke / Autocode credit
+**Proprietary** — BrownHawke Engineering. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Upstream Autocode (Apache-2.0) attribution is preserved in `NOTICE` and `LICENSE.Apache-2.0`. Keep this repository **private**; do not publish secrets (`.env`, webhooks, password hashes).
