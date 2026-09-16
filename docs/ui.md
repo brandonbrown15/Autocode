@@ -63,14 +63,17 @@ ssh -L 8787:127.0.0.1:8787 jetson
 
 ### Option C — Public domain (Hawkeye private)
 
-For a personal phone LLM on **your domain**, use login + Cloudflare Tunnel. See **[hawkeye.md](hawkeye.md)**.
+Canonical host: **`https://hawkeye.brownhawke.engineering`** (subdomain of BrownHawke.engineering).  
+Use login + Cloudflare Tunnel. See **[hawkeye.md](hawkeye.md)**.
 
 ```bash
 AUTOCODE_PRIVATE_MODE=1
 AUTOCODE_PRODUCT_NAME=Hawkeye
+AUTOCODE_PUBLIC_HOST=hawkeye.brownhawke.engineering
+AUTOCODE_UI_SECURE=1
 # password hash from: python3 scripts/set_private_password.py
 AUTOCODE_PERSONAL_LOCAL_ONLY=0   # keep Cursor/Grok escalate
-cloudflared tunnel --url http://127.0.0.1:8787
+cloudflared tunnel route dns hawkeye hawkeye.brownhawke.engineering
 ```
 
 Do **not** bind `0.0.0.0` on a public IP without a tunnel + login.
@@ -82,6 +85,8 @@ Do **not** bind `0.0.0.0` on a public IP without a tunnel + login.
 | `AUTOCODE_UI_HOST` | `127.0.0.1` | Bind address |
 | `AUTOCODE_UI_PORT` | `8787` | Port |
 | `AUTOCODE_UI_REMOTE` | `0` | `1` = prefer Tailscale IP / LAN bind |
+| `AUTOCODE_PUBLIC_HOST` | `hawkeye.brownhawke.engineering` | Hawkeye public hostname |
+| `AUTOCODE_UI_SECURE` | `0` | Force Secure session cookies |
 
 Mutating actions require a session token injected into the page (CSRF guard).
 

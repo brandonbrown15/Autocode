@@ -29,6 +29,12 @@ def product_name() -> str:
     return (os.environ.get("AUTOCODE_PRODUCT_NAME") or "Hawkeye").strip() or "Hawkeye"
 
 
+def public_host() -> str:
+    return (
+        os.environ.get("AUTOCODE_PUBLIC_HOST") or "hawkeye.brownhawke.engineering"
+    ).strip() or "hawkeye.brownhawke.engineering"
+
+
 def private_mode_enabled() -> bool:
     return os.environ.get("AUTOCODE_PRIVATE_MODE", "0").lower() in ("1", "true", "yes", "on")
 

@@ -13,7 +13,7 @@ Upstream (Apache-2.0, keep credit): [brandonbrown15/Autocode](https://github.com
 | **Local Ollama** | Free all-day phone/laptop chat + easy Notion tasks |
 | **Cursor / Grok Bot** | Escalate strenuous work (webhooks) |
 | **Login** | Username/password session on the UI |
-| **Domain** | Cloudflare Tunnel → `https://your.domain` → Jetson UI |
+| **Domain** | Cloudflare Tunnel → `https://hawkeye.brownhawke.engineering` → Jetson UI |
 
 ## Setup
 

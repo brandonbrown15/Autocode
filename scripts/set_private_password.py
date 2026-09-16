@@ -33,6 +33,8 @@ def main() -> None:
     print("AUTOCODE_PERSONAL_LOCAL_ONLY=0")
     print("AUTOCODE_LOCAL_ONLY=0")
     print("AUTOCODE_COST_PROFILE=cursor-grok")
+    print("AUTOCODE_PUBLIC_HOST=hawkeye.brownhawke.engineering")
+    print("AUTOCODE_UI_SECURE=1")
 
 
 if __name__ == "__main__":

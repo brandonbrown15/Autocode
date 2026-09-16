@@ -41,40 +41,60 @@ AUTOCODE_CLOUD_PREFERENCE=cursor
 CURSOR_WEBHOOK_URL=https://…
 GROK_BOT_WEBHOOK_URL=https://…
 AUTOCODE_UI_REMOTE=1
+AUTOCODE_PUBLIC_HOST=hawkeye.brownhawke.engineering
+AUTOCODE_UI_SECURE=1
 ```
 
 `AUTOCODE_PERSONAL_LOCAL_ONLY=1` only if you want to **disable** premium escalate (rare).
 
-## 3. Link your domain
+## 3. Domain — `hawkeye.brownhawke.engineering`
 
-Pick a domain (examples checked available on GoDaddy):
+You already own **BrownHawke.engineering**. Point Hawkeye at the subdomain:
 
-- [brownhawke.ai](https://www.godaddy.com/domainsearch/find?domainToCheck=brownhawke.ai&key=gd_mcp_server&itc=gd_mcp_server)
-- [brownhawke.app](https://www.godaddy.com/domainsearch/find?domainToCheck=brownhawke.app&key=gd_mcp_server&itc=gd_mcp_server)
-- [personalautocode.com](https://www.godaddy.com/domainsearch/find?domainToCheck=personalautocode.com&key=gd_mcp_server&itc=gd_mcp_server)
-- [myautocode.app](https://www.godaddy.com/domainsearch/find?domainToCheck=myautocode.app&key=gd_mcp_server&itc=gd_mcp_server)
+**Canonical URL:** `https://hawkeye.brownhawke.engineering`
 
-Recommended path: **Cloudflare Tunnel** in front of localhost UI (HTTPS + no open Jetson ports):
+Use a **Cloudflare Tunnel** to the Jetson UI on loopback (HTTPS, no open ports):
 
 ```bash
-# On Jetson — UI on loopback
+# On Jetson — UI on loopback only
 AUTOCODE_UI_HOST=127.0.0.1 ./scripts/ui.sh
 
-# Install cloudflared, create a named tunnel, route DNS:
-#   https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
+# One-time tunnel + DNS (Cloudflare must manage DNS for brownhawke.engineering,
+# or create a CNAME at your registrar to the tunnel target Cloudflare prints)
 cloudflared tunnel create hawkeye
-cloudflared tunnel route dns hawkeye chat.brownhawke.ai   # example hostname
-# config.yml service: http://127.0.0.1:8787
+cloudflared tunnel route dns hawkeye hawkeye.brownhawke.engineering
+```
+
+Example `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <TUNNEL_UUID>
+credentials-file: /home/YOU/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: hawkeye.brownhawke.engineering
+    service: http://127.0.0.1:8787
+  - service: http_status:404
+```
+
+```bash
 cloudflared tunnel run hawkeye
 ```
 
-Set `AUTOCODE_UI_SECURE=1` (or rely on `X-Forwarded-Proto: https` from the tunnel) so the login cookie is `Secure`.
+In `.env` on the Jetson:
 
-Alternative: Tailscale only (`./scripts/ui.sh --remote`) — no public domain required.
+```bash
+AUTOCODE_PUBLIC_HOST=hawkeye.brownhawke.engineering
+AUTOCODE_UI_SECURE=1
+```
+
+`AUTOCODE_UI_SECURE=1` (or `X-Forwarded-Proto: https` from the tunnel) makes the login cookie `Secure`.
+
+Alternative: Tailscale only (`./scripts/ui.sh --remote`) — no public hostname required.
 
 ## 4. Phone use
 
-1. Open `https://your.domain`  
+1. Open `https://hawkeye.brownhawke.engineering`  
 2. Sign in  
 3. Chat hits **local** Ollama first  
 4. Hard asks POST to **Cursor** then **Grok Bot** (or reverse if `AUTOCODE_CLOUD_PREFERENCE=grok`)
@@ -89,6 +109,7 @@ Same Notion autopilot / continuous drain as Autocode when you enable those flags
 | `AUTOCODE_PRIVATE_MODE` | `1` | Require login |
 | `AUTOCODE_PRIVATE_USER` | `brown` | Login username |
 | `AUTOCODE_PRIVATE_PASSWORD_HASH` | _(required)_ | From `set_private_password.py` |
+| `AUTOCODE_PUBLIC_HOST` | `hawkeye.brownhawke.engineering` | Public hostname (docs / cookie hints) |
 | `AUTOCODE_PERSONAL_LOCAL_ONLY` | `0` | `1` = never call Cursor/Grok/APIs |
 | `AUTOCODE_LOCAL_ONLY` | `0` | Task router: allow cloud delegates |
 | `CURSOR_WEBHOOK_URL` | | Premium escalate |

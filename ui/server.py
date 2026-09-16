@@ -171,6 +171,7 @@ def readiness() -> dict[str, Any]:
         "personal_local_only": ui_auth.personal_local_only(),
         "private_mode": ui_auth.private_mode_enabled(),
         "product": ui_auth.product_name(),
+        "public_host": ui_auth.public_host(),
         "autopilot": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
         "continuous": env_truthy("AUTOCODE_CONTINUOUS_ENABLED"),
         "checks": checks,
@@ -710,6 +711,7 @@ class Handler(BaseHTTPRequestHandler):
                         "credentials_ready": ui_auth.credentials_ready(),
                         "personal_local_only": ui_auth.personal_local_only(),
                         "product": ui_auth.product_name(),
+                        "public_host": ui_auth.public_host(),
                         "authed": self._authed(),
                     }
                 )
@@ -832,6 +834,8 @@ def main() -> None:
         local = "local-first → Cursor/Grok escalate"
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"{name} UI → http://{HOST}:{PORT}/  [{mode}; {local}]")
+    if ui_auth.private_mode_enabled():
+        print(f"Public host (tunnel): https://{ui_auth.public_host()}/")
     if ui_auth.private_mode_enabled() and not ui_auth.credentials_ready():
         print("WARNING: AUTOCODE_PRIVATE_MODE=1 but password hash missing.")
         print("         Run: python3 scripts/set_private_password.py")

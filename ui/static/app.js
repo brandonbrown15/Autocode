@@ -123,8 +123,9 @@
 
     const chatNote = document.getElementById("chatNote");
     if (chatNote && data.private_mode && !data.personal_local_only) {
+      const host = data.public_host || "hawkeye.brownhawke.engineering";
       chatNote.textContent =
-        `${data.product || "Hawkeye"}: free local LLM all day; Cursor & Grok Bot take strenuous asks. Phone-ready via your domain login.`;
+        `${data.product || "Hawkeye"} @ ${host}: free local LLM all day; Cursor & Grok Bot take strenuous asks.`;
     }
   }
 
