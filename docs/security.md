@@ -23,6 +23,7 @@ Autocode is designed so the **public git repo never holds secrets**.
 3. Keep Ollama on loopback (`127.0.0.1:11434`) unless you intentionally protect it.
 4. Autopilot must not invent, rotate, or exfiltrate secrets.
 5. Paid cloud fallbacks leave the machine — disable them for sensitive workspaces.
+6. **Hawkeye private UI:** set a strong `AUTOCODE_PRIVATE_PASSWORD_HASH`, keep the UI on loopback behind Cloudflare Tunnel or Tailscale, and never commit the hash or webhook URLs.
 
 ## If a secret is leaked
 

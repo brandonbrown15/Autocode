@@ -32,13 +32,13 @@ tail -f logs/worker-*.log logs/nightly-*.log
 
 ## Give the model instructions remotely
 
-Open the Tailscale UI URL on your phone/laptop → **Talk to Autocode**.
+Open the Tailscale UI URL (or Hawkeye domain after login) on your phone/laptop → **Talk to Autocode / Hawkeye**.
 
-- Messages hit the **local** Ollama model on the Jetson first
-- Hard asks auto-escalate to a larger cloud model (Claude / OpenRouter / Grok)
+- Messages hit the **local** Ollama model on the Jetson first (free all day)
+- Hard asks escalate to **Cursor** then **Grok Bot** (webhooks), then optional API keys
 - You can optionally add follow-ups to the Notion Ready checklist from chat
 
-Same feature as sitting at the machine — remote access uses the identical UI.
+Personal private deploy: [hawkeye.md](hawkeye.md).
 
 ## Always-on coding (not just overnight)
 

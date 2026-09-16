@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for Autocode local UI server helpers."""
+"""Tests for Autocode / Hawkeye local UI server helpers."""
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from orchestrator import ops  # noqa: E402
+from ui import auth as ui_auth  # noqa: E402
 from ui import server as ui_server  # noqa: E402
 
 
@@ -25,6 +27,20 @@ class UiHelpersTests(unittest.TestCase):
         self._old_status = ops.STATUS_PATH
         self._old_control = ops.CONTROL_PATH
         self._old_demo = ui_server._demo_log
+        self._env = {k: os.environ.get(k) for k in (
+            "AUTOCODE_PRIVATE_MODE",
+            "AUTOCODE_PRIVATE_USER",
+            "AUTOCODE_PRIVATE_PASSWORD_HASH",
+            "AUTOCODE_PERSONAL_LOCAL_ONLY",
+            "AUTOCODE_PRODUCT_NAME",
+            "CURSOR_WEBHOOK_URL",
+            "GROK_BOT_WEBHOOK_URL",
+        )}
+        for k in self._env:
+            os.environ.pop(k, None)
+        os.environ["AUTOCODE_PRODUCT_NAME"] = "Hawkeye"
+        os.environ["AUTOCODE_PRIVATE_MODE"] = "0"
+        ui_auth.clear_sessions()
         ops.STATUS_PATH = self.tmp / "status.json"
         ops.CONTROL_PATH = self.tmp / "control.json"
         ui_server._demo_log = self.tmp / "ui-demo.log"
@@ -34,6 +50,12 @@ class UiHelpersTests(unittest.TestCase):
         ops.STATUS_PATH = self._old_status
         ops.CONTROL_PATH = self._old_control
         ui_server._demo_log = self._old_demo
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        ui_auth.clear_sessions()
 
     def test_snapshot_and_control(self) -> None:
         ops.write_status(phase="running_local", task_id="BLD-1", task_name="docs", route="local")
@@ -67,6 +89,7 @@ class UiHelpersTests(unittest.TestCase):
             data = ui_server.readiness()
         self.assertIn("checks", data)
         self.assertIn("ready", data)
+        self.assertEqual(data["product"], "Hawkeye")
         ids = {c["id"] for c in data["checks"]}
         self.assertIn("hermes", ids)
         self.assertIn("notion", ids)
@@ -110,11 +133,91 @@ class UiHelpersTests(unittest.TestCase):
 
             with request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp:
                 html = resp.read().decode()
-            self.assertIn("Autocode", html)
+            self.assertIn("Hawkeye", html)
             self.assertIn(token, html)
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+    def test_password_hash_roundtrip(self) -> None:
+        stored = ui_auth.hash_password("correct-horse")
+        self.assertTrue(ui_auth.verify_password("correct-horse", stored))
+        self.assertFalse(ui_auth.verify_password("wrong", stored))
+
+    def test_private_login_gate(self) -> None:
+        os.environ["AUTOCODE_PRIVATE_MODE"] = "1"
+        os.environ["AUTOCODE_PRIVATE_USER"] = "brown"
+        os.environ["AUTOCODE_PRIVATE_PASSWORD_HASH"] = ui_auth.hash_password("secret-pass")
+        ui_auth.clear_sessions()
+
+        httpd = ui_server.ThreadingHTTPServer(("127.0.0.1", 0), ui_server.Handler)
+        port = httpd.server_address[1]
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with self.assertRaises(error.HTTPError) as ctx:
+                request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=5)
+            self.assertEqual(ctx.exception.code, 401)
+
+            with request.urlopen(f"http://127.0.0.1:{port}/login", timeout=5) as resp:
+                login_html = resp.read().decode()
+            self.assertIn("Hawkeye", login_html)
+
+            bad = request.Request(
+                f"http://127.0.0.1:{port}/api/login",
+                data=json.dumps({"username": "brown", "password": "nope"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(error.HTTPError) as ctx:
+                request.urlopen(bad, timeout=5)
+            self.assertEqual(ctx.exception.code, 401)
+
+            good = request.Request(
+                f"http://127.0.0.1:{port}/api/login",
+                data=json.dumps({"username": "brown", "password": "secret-pass"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with request.urlopen(good, timeout=5) as resp:
+                out = json.loads(resp.read().decode())
+                cookie = resp.headers.get("Set-Cookie", "")
+            self.assertTrue(out["ok"])
+            self.assertIn("hawkeye_session=", cookie)
+
+            status_req = request.Request(
+                f"http://127.0.0.1:{port}/api/status",
+                headers={"Cookie": cookie.split(";", 1)[0]},
+            )
+            with request.urlopen(status_req, timeout=5) as resp:
+                snap = json.loads(resp.read().decode())
+            self.assertIn("token", snap)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_chat_escalates_to_cursor_webhook(self) -> None:
+        os.environ["CURSOR_WEBHOOK_URL"] = "http://example.invalid/cursor"
+        os.environ["AUTOCODE_PERSONAL_LOCAL_ONLY"] = "0"
+
+        with mock.patch.object(ui_server, "_ollama_chat", return_value="ESCALATE: too hard"):
+            with mock.patch.object(ui_server, "_webhook_chat", return_value="premium plan") as wh:
+                out = ui_server.handle_chat("redesign the multi-service architecture", seed_notion=False)
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["escalated"])
+        self.assertEqual(out["provider"], "Cursor")
+        self.assertEqual(out["cloud_reply"], "premium plan")
+        wh.assert_called_once()
+
+    def test_chat_local_only_skips_cloud(self) -> None:
+        os.environ["AUTOCODE_PERSONAL_LOCAL_ONLY"] = "1"
+        os.environ["CURSOR_WEBHOOK_URL"] = "http://example.invalid/cursor"
+        with mock.patch.object(ui_server, "_ollama_chat", return_value="ESCALATE: nope"):
+            with mock.patch.object(ui_server, "_cloud_chat") as cloud:
+                out = ui_server.handle_chat("hard thing", seed_notion=False)
+        cloud.assert_not_called()
+        self.assertFalse(out["escalated"])
+        self.assertTrue(out["local_only"])
 
 
 if __name__ == "__main__":

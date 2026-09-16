@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 
 from orchestrator import health as health_mod  # noqa: E402
 from orchestrator import ops  # noqa: E402
+from ui import auth as ui_auth  # noqa: E402
 
 STATIC = Path(__file__).resolve().parent / "static"
 STATE = ROOT / "state"
@@ -36,6 +37,17 @@ LOGS = ROOT / "logs"
 HOST = os.environ.get("AUTOCODE_UI_HOST", "127.0.0.1")
 PORT = int(os.environ.get("AUTOCODE_UI_PORT", "8787"))
 TOKEN = secrets.token_urlsafe(24)
+
+# Paths that stay reachable without a private session (assets + login).
+_PUBLIC_GET = {
+    "/login",
+    "/login.html",
+    "/app.css",
+    "/api/auth",
+}
+_PUBLIC_POST = {
+    "/api/login",
+}
 
 _demo_lock = threading.Lock()
 _demo_proc: subprocess.Popen[str] | None = None
@@ -144,9 +156,21 @@ def readiness() -> dict[str, Any]:
             "optional": True,
         },
     ]
+    if ui_auth.private_mode_enabled():
+        checks.append(
+            {
+                "id": "private_auth",
+                "label": "Private login configured",
+                "ok": ui_auth.credentials_ready(),
+                "hint": "python3 scripts/set_private_password.py → set AUTOCODE_PRIVATE_PASSWORD_HASH",
+            }
+        )
     return {
         "ready": all(c["ok"] for c in checks if not c.get("optional")),
         "local_only": local_only,
+        "personal_local_only": ui_auth.personal_local_only(),
+        "private_mode": ui_auth.private_mode_enabled(),
+        "product": ui_auth.product_name(),
         "autopilot": env_truthy("AUTOCODE_AUTOPILOT_ENABLED"),
         "continuous": env_truthy("AUTOCODE_CONTINUOUS_ENABLED"),
         "checks": checks,
@@ -330,7 +354,6 @@ def _should_escalate(message: str, local_reply: str) -> bool:
     )
     if any(t in text for t in triggers):
         return True
-    # Long architectural asks → escalate
     keywords = ("architecture", "redesign", "migrate", "multi-service", "security audit")
     if len(message) > 400 or sum(1 for k in keywords if k in message.lower()) >= 2:
         return True
@@ -339,17 +362,78 @@ def _should_escalate(message: str, local_reply: str) -> bool:
     return False
 
 
-def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
-    """Escalate to Claude / OpenRouter / xAI. Returns (reply, provider)."""
+def _webhook_chat(url: str, token: str, payload: dict[str, Any], label: str) -> str:
     import json as _json
     import urllib.request
 
+    headers = {"Content-Type": "application/json", "User-Agent": "Hawkeye/1.0"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(
+        url,
+        data=_json.dumps(payload).encode(),
+        method="POST",
+        headers=headers,
+    )
+    with urllib.request.urlopen(req, timeout=int(os.environ.get("AUTOCODE_DELEGATE_TIMEOUT_SEC", "120"))) as resp:
+        raw = resp.read().decode()
+    try:
+        data = _json.loads(raw)
+    except _json.JSONDecodeError:
+        return raw.strip() or f"({label} accepted; empty body)"
+    if isinstance(data, dict):
+        for key in ("reply", "message", "content", "text", "summary"):
+            val = data.get(key)
+            if isinstance(val, str) and val.strip():
+                return val
+            if isinstance(val, dict) and isinstance(val.get("content"), str):
+                return val["content"]
+        return _json.dumps(data)[:2000]
+    return str(data)
+
+
+def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
+    """Escalate hard asks: Cursor → Grok Bot → API keys. Returns (reply, provider)."""
+    import json as _json
+    import urllib.request
+
+    name = ui_auth.product_name()
     prompt = (
-        "You are Autocode's cloud escalator. The local Jetson model could not fully "
+        f"You are {name}'s cloud escalator. The local Jetson model could not fully "
         "handle this operator instruction. Provide a concrete plan or answer, and if "
         "work should be queued, end with IMPROVE: <checklist item>.\n\n"
         f"Operator: {message}\n\nLocal model said:\n{local_reply[:2000]}"
     )
+    payload = {
+        "source": "hawkeye-ui-chat",
+        "product": name,
+        "message": message,
+        "local_reply": local_reply[:4000],
+        "prompt": prompt,
+    }
+
+    prefer = os.environ.get("AUTOCODE_CLOUD_PREFERENCE", "cursor").strip().lower()
+    cursor_url = os.environ.get("CURSOR_WEBHOOK_URL", "").strip()
+    grok_url = os.environ.get("GROK_BOT_WEBHOOK_URL", "").strip()
+    order: list[tuple[str, str, str]] = []
+    if prefer == "grok":
+        if grok_url:
+            order.append(("Grok Bot", grok_url, os.environ.get("GROK_BOT_WEBHOOK_TOKEN", "")))
+        if cursor_url:
+            order.append(("Cursor", cursor_url, os.environ.get("CURSOR_WEBHOOK_TOKEN") or os.environ.get("CURSOR_API_KEY", "")))
+    else:
+        if cursor_url:
+            order.append(("Cursor", cursor_url, os.environ.get("CURSOR_WEBHOOK_TOKEN") or os.environ.get("CURSOR_API_KEY", "")))
+        if grok_url:
+            order.append(("Grok Bot", grok_url, os.environ.get("GROK_BOT_WEBHOOK_TOKEN", "")))
+
+    errors: list[str] = []
+    for label, url, token in order:
+        try:
+            return _webhook_chat(url, token, payload, label), label
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{label}: {e}")
+
     if os.environ.get("ANTHROPIC_API_KEY"):
         body = {
             "model": os.environ.get("AUTOCODE_CLAUDE_MODEL", "claude-sonnet-4-20250514"),
@@ -375,7 +459,7 @@ def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
         body = {
             "model": os.environ.get("AUTOCODE_OPENROUTER_MODEL", "x-ai/grok-2"),
             "messages": [
-                {"role": "system", "content": "You are Autocode cloud escalator."},
+                {"role": "system", "content": f"You are {name} cloud escalator."},
                 {"role": "user", "content": prompt},
             ],
         }
@@ -391,11 +475,11 @@ def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = _json.loads(resp.read().decode())
         return data["choices"][0]["message"]["content"], "OpenRouter"
-    if os.environ.get("XAI_API_KEY"):
+    if os.environ.get("XAI_API_KEY") and not env_truthy("AUTOCODE_DISABLE_METERED_GROK", "1"):
         body = {
             "model": os.environ.get("AUTOCODE_GROK_MODEL", "grok-2-latest"),
             "messages": [
-                {"role": "system", "content": "You are Autocode cloud escalator."},
+                {"role": "system", "content": f"You are {name} cloud escalator."},
                 {"role": "user", "content": prompt},
             ],
         }
@@ -410,24 +494,32 @@ def _cloud_chat(message: str, local_reply: str) -> tuple[str, str]:
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = _json.loads(resp.read().decode())
-        return data["choices"][0]["message"]["content"], "Grok"
-    return (
-        "No cloud provider configured (set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or XAI_API_KEY). "
-        "Local reply retained.",
-        "none",
+        return data["choices"][0]["message"]["content"], "Grok API"
+
+    hint = (
+        "No premium provider configured. Set CURSOR_WEBHOOK_URL and/or GROK_BOT_WEBHOOK_URL "
+        "(recommended), or an API key. Local reply retained."
     )
+    if errors:
+        hint += " Webhook errors: " + "; ".join(errors)
+    return hint, "none"
 
 
 def handle_chat(message: str, seed_notion: bool = True) -> dict[str, Any]:
     message = (message or "").strip()
     if not message:
         return {"ok": False, "error": "message required"}
+    stay_local = ui_auth.personal_local_only()
+    name = ui_auth.product_name()
     system = (
-        "You are Autocode's local co-pilot on a Jetson. Help the operator steer the "
-        "Notion-driven coding autopilot. Be concise. If the request is too large for a "
-        "local model, start with ESCALATE: and say why. If a durable follow-up should be "
-        "queued for Autocode, end with IMPROVE: <checklist item> or BUG: <bug>."
+        f"You are {name}'s local co-pilot on a Jetson — the free all-day model. "
+        "Help the operator steer the Notion-driven coding autopilot. Be concise. "
+        "If the request is too strenuous for a local model, start with ESCALATE: and say why "
+        "so Cursor or Grok Bot can take over. If a durable follow-up should be queued, "
+        "end with IMPROVE: <checklist item> or BUG: <bug>."
     )
+    if stay_local:
+        system += " PERSONAL_LOCAL_ONLY is on: do not ask for cloud models."
     local_reply = ""
     try:
         local_reply = _ollama_chat(message, system)
@@ -439,7 +531,12 @@ def handle_chat(message: str, seed_notion: bool = True) -> dict[str, Any]:
 
     cloud_reply = ""
     provider = ""
-    if escalated:
+    if escalated and stay_local:
+        escalated = False
+        provider = "local-only"
+        if "(local model unavailable:" in local_reply:
+            local_reply += "\n\n(PERSONAL_LOCAL_ONLY=1 — start Ollama or turn that flag off to use Cursor/Grok.)"
+    elif escalated:
         try:
             cloud_reply, provider = _cloud_chat(message, local_reply)
         except Exception as e:  # noqa: BLE001
@@ -459,7 +556,7 @@ def handle_chat(message: str, seed_notion: bool = True) -> dict[str, Any]:
                 seeded_task = seed_checklist_item(
                     title=f"Operator: {message[:80]}",
                     acceptance=(
-                        "Queued from Autocode UI chat.\n\n"
+                        f"Queued from {name} UI chat.\n\n"
                         f"Operator request:\n{message}\n\n"
                         f"Local reply:\n{local_reply[:1000]}\n\n"
                         f"Cloud reply:\n{(cloud_reply or '')[:1000]}"
@@ -471,32 +568,35 @@ def handle_chat(message: str, seed_notion: bool = True) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             print(f"[ui-chat] seed failed: {e}")
 
-    # Persist a short transcript for remote ops
     STATE.mkdir(parents=True, exist_ok=True)
     log = STATE / "ui-chat.jsonl"
     import json as _json
     import time as _time
 
-    log.open("a").write(
-        _json.dumps(
-            {
-                "ts": _time.time(),
-                "message": message,
-                "local_reply": local_reply,
-                "escalated": escalated,
-                "cloud_reply": cloud_reply,
-                "provider": provider,
-                "seeded_task": seeded_task,
-            }
+    with log.open("a") as fh:
+        fh.write(
+            _json.dumps(
+                {
+                    "ts": _time.time(),
+                    "message": message,
+                    "local_reply": local_reply,
+                    "escalated": escalated,
+                    "cloud_reply": cloud_reply,
+                    "provider": provider,
+                    "local_only": stay_local,
+                    "seeded_task": seeded_task,
+                }
+            )
+            + "\n"
         )
-        + "\n"
-    )
     return {
         "ok": True,
         "local_reply": local_reply,
         "escalated": escalated,
         "cloud_reply": cloud_reply,
         "provider": provider,
+        "local_only": stay_local,
+        "product": name,
         "seeded_task": seeded_task,
     }
 
@@ -508,11 +608,19 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write(f"[ui] {self.address_string()} {fmt % args}\n")
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(
+        self,
+        code: int,
+        body: bytes,
+        content_type: str,
+        extra_headers: list[tuple[str, str]] | None = None,
+    ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, val in extra_headers or []:
+            self.send_header(key, val)
         self.end_headers()
         self.wfile.write(body)
 
@@ -531,18 +639,87 @@ class Handler(BaseHTTPRequestHandler):
         tok = hdr or (data or {}).get("token") or ""
         return secrets.compare_digest(str(tok), TOKEN)
 
+    def _session_token(self) -> str | None:
+        return ui_auth.parse_session_cookie(self.headers.get("Cookie"))
+
+    def _wants_secure_cookie(self) -> bool:
+        if env_truthy("AUTOCODE_UI_SECURE"):
+            return True
+        proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        return proto == "https"
+
+    def _authed(self) -> bool:
+        return ui_auth.session_valid(self._session_token())
+
+    def _require_session(self, path: str, *, html: bool = False) -> bool:
+        """Return True if the request may proceed."""
+        if not ui_auth.private_mode_enabled():
+            return True
+        if html and path in _PUBLIC_GET:
+            return True
+        if not html and path in _PUBLIC_POST:
+            return True
+        if path.startswith("/brand/"):
+            return True
+        if self._authed():
+            return True
+        if html:
+            self.send_response(302)
+            self.send_header("Location", "/login")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return False
+        self._send(*json_response({"ok": False, "error": "login required"}, 401))
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
+            if not self._require_session(path, html=True):
+                return
             return self._static("index.html", "text/html; charset=utf-8")
+        if path in ("/login", "/login.html"):
+            if ui_auth.private_mode_enabled() and self._authed():
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            return self._static("login.html", "text/html; charset=utf-8")
         if path == "/app.css":
             return self._static("app.css", "text/css; charset=utf-8")
         if path == "/app.js":
+            if not self._require_session(path, html=True):
+                return
             return self._static("app.js", "application/javascript; charset=utf-8")
         if path.startswith("/brand/"):
             name = path.lstrip("/")
-            ctype = "image/jpeg" if name.endswith((".jpg", ".jpeg")) else "image/png" if name.endswith(".png") else "application/octet-stream"
+            ctype = (
+                "image/jpeg"
+                if name.endswith((".jpg", ".jpeg"))
+                else "image/png"
+                if name.endswith(".png")
+                else "application/octet-stream"
+            )
             return self._static(name, ctype)
+        if path == "/api/auth":
+            return self._send(
+                *json_response(
+                    {
+                        "private_mode": ui_auth.private_mode_enabled(),
+                        "credentials_ready": ui_auth.credentials_ready(),
+                        "personal_local_only": ui_auth.personal_local_only(),
+                        "product": ui_auth.product_name(),
+                        "authed": self._authed(),
+                    }
+                )
+            )
+        # Remaining API + pages need a session in private mode.
+        if path.startswith("/api/"):
+            if not self._require_session(path, html=False):
+                return
+        elif not self._require_session(path, html=True):
+            return
         if path == "/api/status":
             return self._send(*json_response(snapshot()))
         if path == "/api/ready":
@@ -560,6 +737,45 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         data = self._read_json()
+
+        if path == "/api/login":
+            if not ui_auth.private_mode_enabled():
+                return self._send(
+                    *json_response({"ok": True, "private_mode": False, "token": TOKEN})
+                )
+            if not ui_auth.credentials_ready():
+                return self._send(
+                    *json_response(
+                        {
+                            "ok": False,
+                            "error": "Set AUTOCODE_PRIVATE_PASSWORD_HASH first "
+                            "(python3 scripts/set_private_password.py)",
+                        },
+                        503,
+                    )
+                )
+            sess = ui_auth.login(str(data.get("username") or ""), str(data.get("password") or ""))
+            if not sess:
+                return self._send(*json_response({"ok": False, "error": "Invalid username or password"}, 401))
+            return self._send(
+                *json_response({"ok": True, "token": TOKEN}),
+                extra_headers=[
+                    (
+                        "Set-Cookie",
+                        ui_auth.session_cookie_header(sess, secure=self._wants_secure_cookie()),
+                    )
+                ],
+            )
+
+        if path == "/api/logout":
+            ui_auth.logout(self._session_token())
+            return self._send(
+                *json_response({"ok": True}),
+                extra_headers=[("Set-Cookie", ui_auth.clear_session_cookie_header())],
+            )
+
+        if not self._require_session(path, html=False):
+            return
         if not self._ok_token(data):
             return self._send(*json_response({"ok": False, "error": "bad token"}, 403))
         if path == "/api/control":
@@ -596,15 +812,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*json_response({"error": f"missing {name}"}, 404))
         body = path.read_bytes()
         if name == "index.html":
-            body = body.decode("utf-8").replace("{{TOKEN}}", TOKEN).encode("utf-8")
+            html = body.decode("utf-8").replace("{{TOKEN}}", TOKEN)
+            html = html.replace("{{PRODUCT}}", ui_auth.product_name())
+            body = html.encode("utf-8")
+        elif name == "login.html":
+            html = body.decode("utf-8").replace("{{PRODUCT}}", ui_auth.product_name())
+            body = html.encode("utf-8")
         self._send(200, body, content_type)
 
 
 def main() -> None:
     load_dotenv()
     STATE.mkdir(parents=True, exist_ok=True)
+    name = ui_auth.product_name()
+    mode = "private login" if ui_auth.private_mode_enabled() else "open (CSRF token only)"
+    if ui_auth.personal_local_only():
+        local = "local-only (cloud escalate disabled)"
+    else:
+        local = "local-first → Cursor/Grok escalate"
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Autocode UI → http://{HOST}:{PORT}/")
+    print(f"{name} UI → http://{HOST}:{PORT}/  [{mode}; {local}]")
+    if ui_auth.private_mode_enabled() and not ui_auth.credentials_ready():
+        print("WARNING: AUTOCODE_PRIVATE_MODE=1 but password hash missing.")
+        print("         Run: python3 scripts/set_private_password.py")
     print("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()

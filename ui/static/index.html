@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Autocode · BrownHawke Engineering</title>
+  <title>{{PRODUCT}} · BrownHawke Engineering</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -22,8 +22,8 @@
         height="211"
       />
       <div class="brand-copy">
-        <p class="product">Autocode</p>
-        <p class="tagline">Notion-driven coding autopilot — keeps building until the project is finished.</p>
+        <p class="product">{{PRODUCT}}</p>
+        <p class="tagline">Personal coding autopilot — free local LLM all day; Cursor &amp; Grok when it gets hard.</p>
       </div>
     </div>
     <div class="live-chip" id="liveChip" data-phase="idle">
@@ -66,7 +66,7 @@
 
     <section class="chat" aria-labelledby="chatHeading">
       <h2 id="chatHeading">Talk to Autocode</h2>
-      <p class="section-note">Works locally and over Tailscale. Instructions go to the local model first; if it cannot handle them, Autocode escalates to a larger cloud model automatically.</p>
+      <p class="section-note" id="chatNote">Local model is free all day. Hard asks escalate to Cursor / Grok Bot when those webhooks are set. Works from your phone over Tailscale or your private domain.</p>
       <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
       <form class="chat-form" id="chatForm">
         <label for="chatInput" class="sr-only">Message</label>
@@ -88,7 +88,9 @@
   </main>
 
   <footer class="foot">
-    <p>BrownHawke Engineering · Autocode local UI · <a href="https://github.com/brandonbrown15/Autocode">GitHub</a></p>
+    <p>BrownHawke Engineering · {{PRODUCT}} · private
+      · <button type="button" class="btn ghost compact" id="logoutBtn" hidden>Sign out</button>
+    </p>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
   </footer>
 
