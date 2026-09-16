@@ -14,15 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-URL="${1:-${HAWKEYE_REMOTE_URL:-}}"
-if [[ -z "$URL" ]]; then
-  OWNER="$(gh api user -q .login 2>/dev/null || true)"
-  if [[ -n "$OWNER" ]]; then
-    URL="https://github.com/${OWNER}/Hawkeye.git"
-  else
-    URL="https://github.com/brandonbrown15/Hawkeye.git"
-  fi
-fi
+URL="${1:-${HAWKEYE_REMOTE_URL:-https://github.com/brandonbrown15/Hawkeye.git}}"
 
 echo "Hawkeye private remote → $URL"
 if git remote get-url hawkeye >/dev/null 2>&1; then

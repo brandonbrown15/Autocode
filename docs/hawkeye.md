@@ -13,12 +13,12 @@ Open-source Autocode stays a separate public repo. Do not merge Hawkeye-only sec
 
 The cloud agent cannot create private repos with the current GitHub token. On GitHub:
 
-1. **New repository** → name `Hawkeye` → **Private** → create **empty** (no README).  
-2. From this tree:
+1. Open **https://github.com/brandonbrown15/Hawkeye** (private).  
+2. From this tree (once the Cursor GitHub App can access that repo):
 
 ```bash
 chmod +x scripts/publish_hawkeye_private.sh
-./scripts/publish_hawkeye_private.sh git@github.com:YOUR_USER/Hawkeye.git
+./scripts/publish_hawkeye_private.sh https://github.com/brandonbrown15/Hawkeye.git
 ```
 
 ## 2. Turn on login + product name

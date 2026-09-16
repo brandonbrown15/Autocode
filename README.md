@@ -18,23 +18,19 @@ Upstream (Apache-2.0, keep credit): [brandonbrown15/Autocode](https://github.com
 ## Setup
 
 ```bash
-# After you create the empty private GitHub repo "Hawkeye":
-git clone git@github.com:YOU/Hawkeye.git
+git clone https://github.com/brandonbrown15/Hawkeye.git
 cd Hawkeye
 ./start
 python3 scripts/set_private_password.py   # paste hash into .env
 # set CURSOR_WEBHOOK_URL + GROK_BOT_WEBHOOK_URL in .env
-./scripts/ui.sh --remote
+./scripts/ui.sh
+# Cloudflare Tunnel → https://hawkeye.brownhawke.engineering
 ```
 
 Full personal deploy (domain + login + escalate): **[docs/hawkeye.md](docs/hawkeye.md)**
 
-Publishing from an Autocode clone into a new private Hawkeye repo:
-
-```bash
-./scripts/publish_hawkeye_private.sh git@github.com:YOU/Hawkeye.git
-```
-
 ## License
 
-Code inherited from Autocode remains [Apache-2.0](LICENSE) with BrownHawke / Autocode credit. Keep this repository **private**; do not publish secrets (`.env`, webhooks, password hashes).
+**Proprietary** — BrownHawke Engineering. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Upstream Autocode (Apache-2.0) attribution is preserved in `NOTICE` and `LICENSE.Apache-2.0`. Keep this repository **private**; do not publish secrets (`.env`, webhooks, password hashes).
